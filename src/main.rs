@@ -34,6 +34,12 @@ struct Cli {
     /// kubeconfig context to use [default: the current context].
     #[arg(long, requires = "pod", help_heading = "Kubernetes")]
     context: Option<String>,
+    /// Image for the debug container added to images without a shell.
+    #[arg(long, value_name = "IMAGE", default_value = "busybox:1.37", requires = "pod", help_heading = "Kubernetes")]
+    debug_image: String,
+    /// Never add a debug container; containers without a shell are reported instead.
+    #[arg(long, requires = "pod", help_heading = "Kubernetes")]
+    no_debug_container: bool,
     /// Allow sending signals to processes in the pod (read-only otherwise).
     #[arg(long, requires = "pod", help_heading = "Kubernetes")]
     allow_actions: bool,
@@ -170,7 +176,14 @@ fn kube_collector(cli: &Cli, pod: &str, tick: Duration) -> anyhow::Result<Box<dy
         None => (cli.namespace.clone(), pod.to_string()),
     };
     eprintln!("connecting to {} …", cli.context.as_deref().unwrap_or("the current context"));
-    let opts = PodOptions { context: cli.context.clone(), namespace, pod, tick };
+    let opts = PodOptions {
+        context: cli.context.clone(),
+        namespace,
+        pod,
+        tick,
+        debug_image: cli.debug_image.clone(),
+        debug: !cli.no_debug_container,
+    };
     Ok(Box::new(KubeCollector::connect(opts)?))
 }
 

@@ -78,15 +78,30 @@ pub enum Request {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Reply {
-    Hello { context: String, namespace: String, server_version: String },
+    Hello {
+        context: String,
+        namespace: String,
+        server_version: String,
+    },
     Pod(PodInfo),
     Pods(Vec<PodSummary>),
     Nodes(Vec<NodeSummary>),
     Node(NodeInfo),
-    Probe { tools: bool, detail: String },
-    Debug { name: String, created: bool },
+    Probe {
+        tools: bool,
+        detail: String,
+    },
+    /// `ptrace`: false when policy refused CAP_SYS_PTRACE and the container
+    /// was added without it.
+    Debug {
+        name: String,
+        created: bool,
+        ptrace: bool,
+    },
     Stream(StreamId),
-    Helper { name: String },
+    Helper {
+        name: String,
+    },
     Deleted(Vec<String>),
     Done,
     Err(KubeError),

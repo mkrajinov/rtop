@@ -48,6 +48,19 @@ impl State {
     /// Answer requests until `Shutdown` or until the UI side is gone.
     pub async fn serve(mut self, rx: &mut UnboundedReceiver<(u64, Request)>) {
         while let Some((id, req)) = rx.recv().await {
+            // Waiting for a debug container can take a minute (image pull):
+            // answer from a task so stream writes keep flowing meanwhile.
+            if let Request::EnsureDebugContainer { ns, pod, target, image, sleep_secs } = req {
+                let (api, out) = (self.pods(&ns), self.out.clone());
+                tokio::spawn(async move {
+                    let reply = match api {
+                        Ok(api) => super::ephemeral::ensure(&api, &pod, &target, &image, sleep_secs).await,
+                        Err(e) => Err(e),
+                    };
+                    let _ = out.send(Incoming::Reply(id, reply.unwrap_or_else(Reply::Err)));
+                });
+                continue;
+            }
             let stop = req == Request::Shutdown;
             let reply = self.handle(req).await;
             if self.out.send(Incoming::Reply(id, reply)).is_err() || stop {

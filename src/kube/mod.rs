@@ -18,6 +18,8 @@ pub(crate) mod client;
 #[cfg(feature = "kube")]
 mod convert;
 #[cfg(feature = "kube")]
+mod ephemeral;
+#[cfg(feature = "kube")]
 pub mod msg;
 #[cfg(feature = "kube")]
 pub mod session;

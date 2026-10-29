@@ -43,6 +43,10 @@ pub trait Collector {
     fn signal(&mut self, _id: ProcId, _signal: &str) -> anyhow::Result<()> {
         anyhow::bail!("not supported here")
     }
+    /// Results and events to show in the status line once.
+    fn messages(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// `details()` has been requested but the answer is still on its way.

@@ -26,6 +26,9 @@ const TICKS: u64 = 100;
 
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
+const NO_SHELL: &str = "sh: not found in the image";
+const NO_TOOLS: &str = "cat: not found in the image";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     /// Exec requested, or running but the hello has not arrived yet.
@@ -64,6 +67,14 @@ pub struct Session {
     /// Pod with one shared PID namespace: container ID → name, to tell the
     /// containers apart by cgroup. `None`: every process is `container`'s.
     pub shared: Option<HashMap<String, Arc<str>>>,
+    /// The debug container the reader runs in when the image has no shell
+    /// (its processes show under this name).
+    pub exec_in: Option<Arc<str>>,
+    /// A stream this session gave up on; the collector closes it.
+    pub to_close: Option<StreamId>,
+    kills_sent: HashMap<u64, String>,
+    /// Outcomes to show in the status line.
+    pub messages: Vec<String>,
     details_sent: HashMap<u64, (Pid, Instant)>,
     /// Last `details` answer per PID.
     pub answers: HashMap<Pid, (Instant, Response)>,
@@ -90,6 +101,10 @@ impl Session {
             cmd_sent: None,
             cmdlines: HashMap::new(),
             shared: None,
+            exec_in: None,
+            to_close: None,
+            kills_sent: HashMap::new(),
+            messages: Vec::new(),
             details_sent: HashMap::new(),
             answers: HashMap::new(),
             backoff: Duration::from_secs(1),
@@ -98,10 +113,10 @@ impl Session {
         }
     }
 
-    /// Start `sh` with the reader in `container` (which may be a debug
-    /// container next to the one being read). Returns the request id whose
-    /// reply carries the stream.
-    pub fn open(&mut self, k: &mut KubeHandle, ns: &str, pod: &str, container: &str) -> u64 {
+    /// Start `sh` with the reader in the container, or in its debug
+    /// container. Returns the request id whose reply carries the stream.
+    pub fn open(&mut self, k: &mut KubeHandle, ns: &str, pod: &str) -> u64 {
+        let container = self.exec_in.as_deref().unwrap_or(&self.container).to_string();
         self.phase = Phase::Starting;
         self.retry_at = None;
         self.stream = None;
@@ -112,7 +127,7 @@ impl Session {
         k.send(Request::ExecOpen {
             ns: ns.into(),
             pod: pod.into(),
-            container: container.into(),
+            container,
             command: vec!["sh".into()],
             stdin_init: READER.as_bytes().to_vec(),
         })
@@ -129,7 +144,7 @@ impl Session {
     pub fn on_closed(&mut self, exit_code: Option<i32>, error: Option<KubeError>) {
         let why = match (error, exit_code) {
             (Some(e), _) => e.to_string(),
-            (None, Some(127)) => "sh: not found in the image".into(),
+            (None, Some(127)) => NO_SHELL.into(),
             (None, Some(c)) => format!("reader exited with status {c}"),
             (None, None) => "session closed".into(),
         };
@@ -140,7 +155,9 @@ impl Session {
     /// up to 30 s. The last sample stays on screen, marked stale.
     pub fn fail(&mut self, why: &str) {
         self.phase = Phase::Down;
-        self.stream = None;
+        if let Some(s) = self.stream.take() {
+            self.to_close = Some(s);
+        }
         self.error = Some(why.to_string());
         self.retry_at = Some(Instant::now() + self.backoff);
         self.backoff = (self.backoff * 2).min(MAX_BACKOFF);
@@ -150,6 +167,14 @@ impl Session {
     pub fn stop(&mut self, why: &str) {
         self.fail(why);
         self.retry_at = None;
+    }
+
+    /// The image lacks `sh` or `cat`: only a debug container can read it.
+    pub fn needs_debug(&self) -> bool {
+        self.exec_in.is_none()
+            && self.error.as_deref().is_some_and(|e| {
+                e.contains(NO_SHELL) || e.contains(NO_TOOLS) || e.contains("executable file not found")
+            })
     }
 
     /// Down with no retry planned (see [`Session::stop`]).
@@ -170,6 +195,12 @@ impl Session {
 
     fn answer(&mut self, resp: Response, now: Instant) {
         if resp.seq == 0 {
+            // A shell without cat (some minimal images): the reader cannot
+            // read files, so this needs the debug container too.
+            if resp.frames.iter().any(|f| f.name == "passwd" && f.rc == 127) {
+                self.fail(NO_TOOLS);
+                return;
+            }
             self.hello(&resp);
             self.phase = Phase::Live;
             self.backoff = Duration::from_secs(1);
@@ -194,6 +225,13 @@ impl Session {
             }
         } else if let Some((pid, _)) = self.details_sent.remove(&resp.seq) {
             self.answers.insert(pid, (now, resp));
+        } else if let Some(what) = self.kills_sent.remove(&resp.seq) {
+            let rc = resp.frames.iter().find(|f| f.name == "rc");
+            self.messages.push(match rc {
+                Some(f) if f.rc == 0 => format!("{what} in {}: done", self.container),
+                Some(f) => format!("{what} in {}: {}", self.container, f.text().trim()),
+                None => format!("{what} in {}: no answer", self.container),
+            });
         }
         // Anything else answers a request that already timed out.
     }
@@ -252,6 +290,20 @@ impl Session {
         }
     }
 
+    /// `kill -s <signal> <pid>` inside the container.
+    pub fn signal(&mut self, k: &mut KubeHandle, signal: &str, pid: Pid) -> bool {
+        if !matches!(self.phase, Phase::Live | Phase::Stale) {
+            return false;
+        }
+        match self.write(k, "kill", &format!("{signal} {pid}")) {
+            Some(seq) => {
+                self.kills_sent.insert(seq, format!("kill -s {signal} {pid}"));
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn details_pending(&self, pid: Pid) -> bool {
         self.details_sent.values().any(|&(p, _)| p == pid)
     }
@@ -276,7 +328,8 @@ impl Session {
                         p.cmdline = lp::cmdline(raw, &p.name);
                     }
                     if let Some(ids) = &self.shared {
-                        let c = shared_container(ids, cgroup, &p.name, &self.container);
+                        let own = self.exec_in.as_ref().unwrap_or(&self.container);
+                        let c = shared_container(ids, cgroup, &p.name, own);
                         p.origin = Some(Origin { pod: None, container: c });
                     }
                 }
@@ -407,6 +460,35 @@ pub fn proc_files(pid: Pid, r: &Response) -> ProcFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The real script under this machine's /bin/sh (dash in the dev
+    /// container): hello, then a snap, decoded by the wire parser.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reader_script_answers_under_sh() {
+        use std::io::{Read, Write};
+        use std::process::{Command, Stdio};
+        let mut sh = Command::new("sh").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let mut stdin = sh.stdin.take().unwrap();
+        stdin.write_all(READER.as_bytes()).unwrap();
+        stdin.flush().unwrap();
+        // Requests only after the script is parsed, as the session does.
+        std::thread::sleep(Duration::from_millis(300));
+        stdin.write_all(b"snap 1\nbye\n").unwrap();
+        drop(stdin);
+        let mut out = Vec::new();
+        sh.stdout.take().unwrap().read_to_end(&mut out).unwrap();
+        sh.wait().unwrap();
+        let mut d = Decoder::default();
+        d.push(&out);
+        let hello = d.next_response().unwrap();
+        assert_eq!(hello.text("version").as_deref(), Some("1\n"));
+        let snap = d.next_response().unwrap();
+        assert_eq!(snap.seq, 1);
+        assert!(snap.get("/proc/stat").is_some());
+        let me = snap.procs().find(|p| p.pid == std::process::id() as Pid).expect("the test itself is listed");
+        assert!(me.uid.is_some() && me.fds.is_some());
+    }
 
     #[test]
     fn passwd_maps_uids() {

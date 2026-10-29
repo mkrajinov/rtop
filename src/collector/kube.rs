@@ -29,6 +29,11 @@ pub struct PodOptions {
     pub namespace: Option<String>,
     pub pod: String,
     pub tick: Duration,
+    /// Image of the debug container for images without a shell.
+    pub debug_image: String,
+    /// `--no-debug-container` turns this off: rtop then only reports
+    /// containers it cannot read.
+    pub debug: bool,
 }
 
 pub struct KubeCollector {
@@ -39,6 +44,10 @@ pub struct KubeCollector {
     sessions: Vec<Session>,
     /// ExecOpen request id → session index.
     opening: HashMap<u64, usize>,
+    /// EnsureDebugContainer request id → session index.
+    debugging: HashMap<u64, usize>,
+    debug_image: String,
+    debug: bool,
     tick: Duration,
     /// A target uptime and the local instant it was seen at: turns the
     /// target's clock into `Snapshot::clock`.
@@ -76,6 +85,9 @@ impl KubeCollector {
             implicit_context,
             sessions: Vec::new(),
             opening: HashMap::new(),
+            debugging: HashMap::new(),
+            debug_image: opts.debug_image,
+            debug: opts.debug,
             tick: opts.tick,
             epoch: None,
             notes: Vec::new(),
@@ -128,10 +140,61 @@ impl KubeCollector {
 
     fn open(&mut self, i: usize) {
         let Target::Pod { namespace, pod, .. } = &self.target else { return };
-        let s = &mut self.sessions[i];
-        let container = s.container.to_string();
-        let id = s.open(&mut self.k, namespace, pod, &container);
+        let id = self.sessions[i].open(&mut self.k, namespace, pod);
         self.opening.insert(id, i);
+    }
+
+    /// The image has no shell (or no cat): add a debug container that
+    /// shares the container's PID namespace and read from there (FR-003).
+    fn debug(&mut self, i: usize) {
+        let Target::Pod { namespace, pod, .. } = &self.target else { return };
+        let s = &mut self.sessions[i];
+        if !self.debug {
+            s.stop("no sh/cat in the image, and --no-debug-container is set");
+            return;
+        }
+        s.phase = Phase::Starting;
+        let id = self.k.send(Request::EnsureDebugContainer {
+            ns: namespace.clone(),
+            pod: pod.clone(),
+            target: s.container.to_string(),
+            image: self.debug_image.clone(),
+            sleep_secs: 3600,
+        });
+        self.debugging.insert(id, i);
+    }
+
+    fn debug_ready(&mut self, i: usize, reply: Reply) {
+        let ns_pod = match &self.target {
+            Target::Pod { namespace, pod, .. } => format!("{namespace}/{pod}"),
+            Target::Node { node, .. } => node.clone(),
+        };
+        match reply {
+            Reply::Debug { name, created, ptrace } => {
+                if !created {
+                    self.note(&format!("reading {} through debug container {name}", self.sessions[i].container));
+                } else {
+                    self.note(&format!(
+                        "added debug container {name} ({}) to {ns_pod}; it stays in the pod spec until the pod is deleted",
+                        self.debug_image
+                    ));
+                }
+                if !ptrace {
+                    self.note(&format!(
+                        "{name} runs without SYS_PTRACE (policy): other users' fds and environ are hidden"
+                    ));
+                }
+                let ids = self.container_ids();
+                let s = &mut self.sessions[i];
+                s.exec_in = Some(name.into());
+                // The reader now sits next to the target: tell their
+                // processes apart by cgroup, as in a shared namespace.
+                s.shared = Some(ids);
+                self.open(i);
+            }
+            Reply::Err(e) => self.sessions[i].stop(&format!("debug container: {e}")),
+            other => self.sessions[i].stop(&format!("debug container: unexpected reply {other:?}")),
+        }
     }
 
     /// Everything that arrived since the last call.
@@ -147,6 +210,8 @@ impl KubeCollector {
             Incoming::Reply(id, reply) => {
                 if let Some(i) = self.opening.remove(&id) {
                     self.sessions[i].on_open(reply);
+                } else if let Some(i) = self.debugging.remove(&id) {
+                    self.debug_ready(i, reply);
                 }
             }
             Incoming::Event(Event::StreamData { stream, data }) => {
@@ -239,7 +304,12 @@ impl KubeCollector {
     fn step(&mut self, now: Instant) {
         self.drain();
         for i in 0..self.sessions.len() {
-            if self.sessions[i].retry_due(now) {
+            if let Some(stream) = self.sessions[i].to_close.take() {
+                self.k.send(Request::StreamClose { stream });
+            }
+            if self.sessions[i].needs_debug() && self.sessions[i].phase == Phase::Down {
+                self.debug(i);
+            } else if self.sessions[i].retry_due(now) {
                 self.open(i);
             }
             self.sessions[i].tick(&mut self.k, now, self.tick);
@@ -366,6 +436,19 @@ impl Collector for KubeCollector {
         Some(&self.target)
     }
 
+    fn signal(&mut self, id: ProcId, signal: &str) -> anyhow::Result<()> {
+        let s = self.sessions.iter_mut().find(|s| s.space == id.space).ok_or_else(|| anyhow!("no reader"))?;
+        if !s.signal(&mut self.k, signal, id.pid) {
+            bail!("container {} is not connected", s.container);
+        }
+        Ok(())
+    }
+
+    fn messages(&mut self) -> Vec<String> {
+        self.drain();
+        self.sessions.iter_mut().flat_map(|s| s.messages.drain(..)).collect()
+    }
+
     fn link(&self) -> Option<Link> {
         let now = Instant::now();
         let stale = self
@@ -404,6 +487,43 @@ fn label(d: &mut ProcessDetails, prefix: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture(name: &str) -> Vec<u8> {
+        std::fs::read(format!("{}/tests/fixtures/kube/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    }
+
+    /// T034: answers captured from busybox in the kind cluster go through the
+    /// same parsers as local /proc.
+    #[test]
+    fn kind_capture_parses_like_local_proc() {
+        let (mut k, _api) = crate::kube::client::tests::mocked();
+        let mut s = Session::new(2, "sidecar");
+        s.phase = Phase::Live;
+        s.on_data(&fixture("kind-hello.bin"), Instant::now());
+        assert_eq!(s.phase, Phase::Live);
+        s.stream = Some(1);
+        s.tick(&mut k, Instant::now(), Duration::from_secs(2));
+        s.on_data(&fixture("kind-snap.bin"), Instant::now());
+        let rows = s.rows(&mut k);
+        assert!(rows.len() >= 2, "{rows:?}");
+        let init = rows.iter().find(|p| p.pid == 1).unwrap();
+        assert_eq!((init.user.as_str(), init.space), ("root", 2));
+        assert!(init.rss > 0 && init.start_time > 1_600_000_000);
+        // The reader labels itself.
+        assert!(rows.iter().any(|p| p.cmdline.contains("rtop's reader")), "{rows:?}");
+
+        let mut d = crate::kube::wire::Decoder::default();
+        d.push(&fixture("kind-details.bin"));
+        let resp = d.next_response().unwrap();
+        let files = session::proc_files(1, &resp);
+        assert!(files.fds.as_ref().is_some_and(|f| !f.is_empty()));
+        assert!(!files.ns.is_empty() && !files.tasks.is_empty());
+        let env = s.env.unwrap();
+        let mut det = lp::details(&files, &env, &mut |u| u.to_string()).unwrap();
+        label(&mut det, "[multi/sidecar]");
+        assert!(det.overview.iter().all(|f| f.source.starts_with("[multi/sidecar] ")));
+        assert!(!det.limits.is_empty() && !det.regions.is_empty());
+    }
 
     /// T020: two containers each have a PID 1 and a PID 7; merged, they stay
     /// distinct processes and parents resolve inside each container.

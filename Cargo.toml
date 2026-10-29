@@ -26,6 +26,7 @@ procfs = "0.18"
 
 [dev-dependencies]
 http = "1"
+http-body-util = "0.1"
 insta = "1"
 tower-test = "0.4"
 

@@ -133,12 +133,21 @@ rtop_reader() {
 		_d "$1"
 	}
 
+	# kill <seq> <SIGNAL> <pid>: only sent when rtop runs with --allow-actions.
+	_kill() {
+		_f rc
+		kill -s "$2" "$3" 2>&1
+		_e $?
+		_d "$1"
+	}
+
 	_hello
 	while read -r req seq rest; do
 		case $req in
 		snap) _snap "$seq" ;;
 		cmd) _cmd "$seq" $rest ;;
 		details) _details "$seq" $rest ;;
+		kill) _kill "$seq" $rest ;;
 		bye) exit 0 ;;
 		*) _d "${seq:-0}" ;;
 		esac

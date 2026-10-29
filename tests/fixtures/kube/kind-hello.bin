@@ -1,0 +1,88 @@
+F version
+1
+E 0
+F pid
+844
+E 0
+F uname
+7.0.14-linuxkit
+E 0
+F passwd
+root:x:0:0:root:/root:/bin/sh
+daemon:x:1:1:daemon:/usr/sbin:/bin/false
+bin:x:2:2:bin:/bin:/bin/false
+sys:x:3:3:sys:/dev:/bin/false
+sync:x:4:100:sync:/bin:/bin/sync
+mail:x:8:8:mail:/var/spool/mail:/bin/false
+www-data:x:33:33:www-data:/var/www:/bin/false
+operator:x:37:37:Operator:/var:/bin/false
+nobody:x:65534:65534:nobody:/home:/bin/false
+E 0
+F pagesize
+4096
+E 0
+F statm
+1034 555 511 265 0 93 0
+E 0
+F status
+Name:	sh
+Umask:	0022
+State:	S (sleeping)
+Tgid:	844
+Ngid:	0
+Pid:	844
+PPid:	0
+TracerPid:	0
+Uid:	0	0	0	0
+Gid:	0	0	0	0
+FDSize:	64
+Groups:	0 10 
+NStgid:	844
+NSpid:	844
+NSpgid:	844
+NSsid:	844
+Kthread:	0
+VmPeak:	    4136 kB
+VmSize:	    4136 kB
+VmLck:	       0 kB
+VmPin:	       0 kB
+VmHWM:	    2220 kB
+VmRSS:	    2220 kB
+RssAnon:	     176 kB
+RssFile:	    2044 kB
+RssShmem:	       0 kB
+VmData:	     240 kB
+VmStk:	     132 kB
+VmExe:	    1060 kB
+VmLib:	    2436 kB
+VmPTE:	      52 kB
+VmSwap:	       0 kB
+HugetlbPages:	       0 kB
+CoreDumping:	0
+THP_enabled:	1
+untag_mask:	0xffffffffffffff
+Threads:	1
+SigQ:	1/96119
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000000000
+SigIgn:	0000000000000004
+SigCgt:	0000000000010000
+CapInh:	0000000000000000
+CapPrm:	00000000a80425fb
+CapEff:	00000000a80425fb
+CapBnd:	00000000a80425fb
+CapAmb:	0000000000000000
+NoNewPrivs:	0
+Seccomp:	0
+Seccomp_filters:	0
+Speculation_Store_Bypass:	vulnerable
+SpeculationIndirectBranch:	unknown
+Cpus_allowed:	3ff
+Cpus_allowed_list:	0-9
+Mems_allowed:	1
+Mems_allowed_list:	0
+voluntary_ctxt_switches:	15
+nonvoluntary_ctxt_switches:	0
+E 0
+D 0

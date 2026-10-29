@@ -41,7 +41,7 @@ Local mode must behave exactly as before.
 
 **⚠️ CRITICAL**: no user story work begins until this phase is complete
 
-- [ ] T005 Measure the clean build time and binary size with and without `--no-default-features`, and record them in research.md R1 (first run 2026-10-29: release build 58 s vs 20 s, binary 1.9 MB both, because the kube code is not reachable from `main` yet; re-measure after T027)
+- [X] T005 Measure the clean build time and binary size with and without `--no-default-features`, and record them in research.md R1 (first run 2026-10-29: release build 58 s vs 20 s, binary 1.9 MB both, because the kube code is not reachable from `main` yet; re-measure after T027). Done: 65 s and 10.8 MB with the feature, 19 s and 1.95 MB without, recorded in R1
 - [X] T006 Add `ProcId { space: u16, pid: Pid }`, `Process.space`, `Process.origin: Option<Origin>`, `Process::id()` and `Target` to src/model.rs (data-model.md)
 - [X] T007 Change `Collector::details` to take `ProcId`, and add `fn target(&self) -> Option<&Target>` (default `None`) and a `Pending` error type, in src/collector/mod.rs
 - [X] T008 Update src/collector/linux.rs, src/collector/macos.rs and src/collector/fixture.rs to set `space: 0`, `origin: None` and accept `ProcId` in `details`
@@ -103,15 +103,25 @@ exec first, debug container fallback.
 - [X] T027 [US1] Add flags `--pod`, `-c/--container`, `-n/--namespace`, `--context` and the Kubernetes default `-d` of 2.0 to src/main.rs, gated on `cfg(feature = "kube")`, per contracts/cli.md; reject `lab` in Kubernetes mode; send `Shutdown` on exit and from the panic hook
 - [X] T028 [US1] CONTAINER column (shown only when a target is set) and a container filter key in src/ui/table.rs and src/app.rs (FR-005)
 - [X] T029 [US1] Target line `context · ns/pod · node` (context highlighted when not given explicitly) and a stale marker with age in src/ui/header.rs (FR-008, FR-012)
-- [ ] T030 [US1] `Probe` and `EnsureDebugContainer` in src/kube/ephemeral.rs, with mock tests (reuse vs append, `Unsupported` when disabled):
+- [X] T030 [US1] `Probe` and `EnsureDebugContainer` in src/kube/ephemeral.rs, with mock tests (reuse vs append, `Unsupported` when disabled):
   - probe with `command -v cat`, treating exit 127 or "not found" as missing;
   - reuse a running `rtop-<c>-*`, or patch the `ephemeralcontainers` subresource with `targetContainerName`, the debug image, `sleep 3600` and `SYS_PTRACE`;
   - wait for running;
   - `--debug-image` and `--no-debug-container` flags, and the user notice (FR-003).
+  - Done differently: no separate `Probe` round trip. The exec of `sh` itself is the probe
+    ("executable file not found", exit 127), and a hello whose `passwd` frame fails with 127
+    means `cat` is missing. When policy refuses `SYS_PTRACE`, the container is added without it
+    and the header says so. Disabled fallback is decided on the UI side (no request is sent).
 - [X] T031 [US1] `shareProcessNamespace` in src/collector/kube.rs: a single session, with container attribution via `/proc/<pid>/cgroup` matched to `containerStatuses[].containerID`, and a `pause` label (research R4)
-- [ ] T032 [US1] Handle pod gone, restarted (new restart count) and not Running, with a reattach offer, in src/collector/kube.rs and src/app.rs (spec edge cases)
-- [ ] T033 [US1] Read-only by default: disable `k` and `+`/`-` unless `--allow-actions`; with it, send `kill`/`renice` requests through the session and confirm with the target named, in src/app.rs (FR-011)
-- [ ] T034 [US1] Validate quickstart.md §2–§4 on kind; replace the placeholder fixtures in tests/fixtures/kube/ with real captures
+- [X] T032 [US1] Handle pod gone, restarted (new restart count) and not Running, with a reattach offer, in src/collector/kube.rs and src/app.rs (spec edge cases)
+  - Done: reattaching is automatic. A restarted container gets a fresh reader. A deleted pod
+    stops all readers, and a new pod with the same name (new UID) is picked up again.
+- [X] T033 [US1] Read-only by default: disable `k` and `+`/`-` unless `--allow-actions`; with it, send `kill`/`renice` requests through the session and confirm with the target named, in src/app.rs (FR-011)
+  - Done for signals (`kill <seq> <SIG> <pid>` in the reader; the result shows in the status
+    line). Remote renice is left out for now and says so.
+- [X] T034 [US1] Validate quickstart.md §2–§4 on kind; replace the placeholder fixtures in tests/fixtures/kube/ with real captures
+  - Done: validated on kind with the multi, limited, shared and distroless pods. Real captures
+    were added as `kind-*.bin`. The hand-written ones stay for edge cases a capture lacks.
 
 **Checkpoint**: Story 1 works on kind with multi-container, distroless and shared-namespace pods.
 

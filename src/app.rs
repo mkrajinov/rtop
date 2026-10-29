@@ -377,6 +377,9 @@ impl App {
             return;
         }
         let mut snap = self.collector.snapshot();
+        for m in self.collector.messages() {
+            self.set_status(m);
+        }
         // A remote collector hands out the same sample until a new one
         // arrives; computing CPU% again would read as 0% for everything.
         if snap.clock.is_some() && snap.clock == self.snapshot.clock {
@@ -812,7 +815,7 @@ impl App {
                     if self.collector.target().is_some() {
                         let (id, where_) = (p.id(), container(p).to_string());
                         let msg = match self.collector.signal(id, sig.as_str().trim_start_matches("SIG")) {
-                            Ok(()) => format!("kill -s {sig} {pid} sent in container {where_}"),
+                            Ok(()) => format!("kill -s {sig} {pid} sent to container {where_}…"),
                             Err(e) => format!("kill {pid} in {where_}: {e}"),
                         };
                         self.set_status(msg);

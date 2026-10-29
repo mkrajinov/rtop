@@ -42,6 +42,11 @@ alternative is used.
     instead of watches, one process per call, and an external tool dependency.
 - **Costs**: a slower clean build and a binary several MB larger with the feature on. Both are
   measured in T005, and the default can be revisited.
+  - **Measured (T005, 2026-10-29, after the pod view landed)**: on an Apple-silicon Mac, a
+    clean `cargo build --release` (thin LTO, stripped) takes 65 s and makes a 10.8 MB binary.
+    With `--no-default-features` it takes 19 s and the binary is 1.95 MB. So the feature costs
+    about 46 s of clean build time and about 8.8 MB. Incremental builds are unaffected. Kept on
+    by default: Kubernetes mode is a headline feature, and the lean build is one flag away.
 - **Crash isolation**: the kube thread runs inside `catch_unwind`. A panic there marks every
   session stale and restarts the thread with backoff. It never takes down the UI.
 
