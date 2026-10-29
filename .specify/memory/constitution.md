@@ -64,8 +64,12 @@ Rationale: a monitor that distorts the system it measures teaches the wrong less
 - New dependencies need a reason a few lines of code cannot meet; macOS FFI (IOKit, SMC,
   HID) is raw `extern "C"` confined to collector modules, with owned wrappers that
   release resources on `Drop`.
+- Heavy dependencies that serve one optional mode (for example an async runtime and a
+  Kubernetes client) MUST sit behind a Cargo feature, confined to that mode's module and
+  thread; `cargo build --no-default-features` MUST still produce a working local-only rtop.
 - No network access at runtime, except Kubernetes mode, which talks only to the API server of
-  the kubeconfig context the user selected, through `kubectl`. No telemetry.
+  the kubeconfig context the user selected, through rtop's own Kubernetes module (kube-rs,
+  feature `kube`). No telemetry.
 - Colours are exact Tailwind CSS v4 palette values, chosen through the theme system.
 - UI accents never use borders or colour stripes flush against an edge; selection uses a
   background highlight, accents are inset glyphs or detached pills.
@@ -89,4 +93,4 @@ semantic versioning: MAJOR for removing or redefining a principle, MINOR for add
 principle or section, PATCH for wording. Runtime guidance lives in `README.md` and
 `ROADMAP.md`.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-29 | **Last Amended**: 2026-10-29
+**Version**: 1.2.0 | **Ratified**: 2026-10-29 | **Last Amended**: 2026-10-29

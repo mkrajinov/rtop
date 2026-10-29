@@ -1,7 +1,8 @@
 # Contract: reader wire protocol
 
-The reader is a POSIX `sh` script sent as the first stdin input of
-`kubectl exec -i <pod> -c <container> --context <ctx> -- sh`. It defines functions, prints a
+The reader is a POSIX `sh` script that the kube thread writes as the first stdin input of an
+exec session running `sh` in the target (`ExecOpen` with `stdin_init`, see kube-messages.md).
+The bytes move as `StreamWrite` / `Event::StreamData` messages. It defines functions, prints a
 hello frame, then loops reading one request per line. The same protocol is used in exec,
 debug-container and helper-pod sessions. A future binary reader (research R10) must speak it
 unchanged.
@@ -50,7 +51,8 @@ The link frames come from `readlink`. If `readlink` is missing, the shell report
 - **`snap`**: no `D` within 2 × the refresh interval marks the session Stale. The request is
   not resent until the next tick.
 - **`details`**: no `D` within 5 s shows "details timed out" for that process.
-- **Dead session**: stdout closing or kubectl exiting starts a reconnect with backoff.
+- **Dead session**: `Event::StreamClosed`, or `Event::ThreadRestarted`, starts a reconnect with
+  backoff.
 
 ## Fixtures
 

@@ -10,7 +10,8 @@ What rtop is attached to. Shown in the header (FR-008) and prefixed to provenanc
 | Field | Type | Notes |
 |---|---|---|
 | kind | `Local \| Pod \| Node` | |
-| context | `String` | resolved once at start; passed as `--context` on every kubectl call |
+| context | `String` | resolved once when the kube client is built; no other context is used |
+| context_explicit | `bool` | false when it came from the kubeconfig's current context (header highlights it) |
 | namespace | `Option<String>` | pod namespace; for nodes, the helper pod namespace |
 | pod | `Option<String>` | |
 | node | `Option<String>` | for pods: the node it runs on (from status) |
@@ -19,7 +20,7 @@ What rtop is attached to. Shown in the header (FR-008) and prefixed to provenanc
 Validation:
 - Exactly one of pod and node is set in Kubernetes mode.
 - Pod names accept a `ns/name` shorthand.
-- The context must exist in the kubeconfig (`kubectl config get-contexts -o name`).
+- The context must exist in the kubeconfig; `Hello` fails with `Invalid` otherwise.
 
 ## ProcId (new key, replaces bare `Pid` as identity)
 
@@ -59,7 +60,8 @@ One long-lived reader per PID namespace.
 |---|---|---|
 | space | `u16` | |
 | via | `Exec{container} \| Debug{container, ephemeral} \| Helper{pod}` | how it was opened; shown in provenance |
-| command | `Vec<String>` | the kubectl argv, shown in the detail view |
+| stream | `StreamId` | exec stream on the kube thread |
+| equivalent | `String` | the equivalent `kubectl exec …` command, shown in the detail view |
 | state | `Probing \| Starting \| Live \| Stale{since} \| Failed{reason}` | |
 | latest | `Option<(Instant, Sample)>` | last parsed `snap` |
 | passwd | `HashMap<u32, String>` | from the target's `/etc/passwd` |
@@ -82,7 +84,7 @@ Probing ──tools ok──▶ Starting ──first frame──▶ Live ──r
 | procs | `Vec<RemoteProc{pid, stat, uid, fds}>` | fed to `linux_parse::process_row` |
 | cgroup | `Vec<(file, text)>` | container cgroup files (pod mode) |
 
-## PodInfo / ContainerInfo (from `kubectl get pod -o json`)
+## PodInfo / ContainerInfo (from `GetPod` and `Event::Pod`; shapes in contracts/kube-messages.md)
 
 | Field | Source |
 |---|---|
@@ -92,10 +94,10 @@ Probing ──tools ok──▶ Starting ──first frame──▶ Live ──r
 | containers[].id, ready, restarts, state, last_termination | `status.containerStatuses[]` |
 | ephemeral[] (name, running) | `status.ephemeralContainerStatuses[]`, for reuse (R3) |
 
-## NodeIndex (node mode, refreshed every 10 s)
+## NodeIndex (node mode, pushed by a watcher)
 
 `pod_uid → (namespace, name)` and `container_id → (pod_uid, container name)`, from
-`kubectl get pods -A --field-selector spec.nodeName=<node> -o json`. Joined with
+`Event::NodeIndex` (a watcher on pods with `spec.nodeName=<node>`). Joined with
 `attribution::parse(cgroup_path) -> Option<(pod_uid, container_id)>`.
 
 ## ContainerUsage (Story 4)
@@ -120,5 +122,6 @@ Derived values:
 | labels | `app.kubernetes.io/managed-by=rtop`, `rtop.io/session=<random>` |
 | deadline | `activeDeadlineSeconds: 3600` |
 
-Lifecycle: create → wait Running (timeout 60 s, show events on failure) → session → delete
-on exit. Finished helpers found by label are deleted at the next start.
+Lifecycle: `HelperCreate` (waits for Running, 60 s, events on failure) → session →
+`HelperDelete` on exit, Ctrl-C, SIGTERM or panic. `HelperGc` deletes finished helpers found by
+label at the next start.

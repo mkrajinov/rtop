@@ -9,16 +9,18 @@
 `rtop --pod ns/name` and `rtop --node name` run the normal TUI on the laptop. They read Linux
 `/proc` data from the target through the Kubernetes API only:
 
-- **Transport**: `kubectl` child processes inherit every kubeconfig auth form (research R1).
-- **Reader**: a small POSIX-`sh` reader runs in one long-lived `kubectl exec -i` session per PID
-  namespace. It streams framed `/proc` text, and the laptop parses it with the existing pure
-  `linux_parse` functions (R2).
+- **Client**: a `src/kube/` module on **kube-rs**, in the same binary behind a default-on `kube`
+  Cargo feature. All its async I/O runs on one tokio `current_thread` runtime thread, which
+  talks to the synchronous UI side through channels (research R1, `contracts/kube-messages.md`).
+- **Reader**: a small POSIX-`sh` reader runs in one long-lived exec session per PID namespace. It
+  streams framed `/proc` text, and the laptop parses it with the existing pure `linux_parse`
+  functions (R2).
 - **Pods**: exec into each container first. If the image has no shell or `cat`, add a reused
   busybox ephemeral container targeting it (R3).
-- **Nodes**: a labelled, self-expiring helper pod with `hostPID` on the node (R8). Processes are
-  attributed to pod and container from their cgroup path (R9).
+- **Nodes**: a labelled, self-expiring helper pod with `hostPID`. Processes are attributed to
+  pods and containers from their cgroup paths, joined with a watcher-maintained index (R8, R9).
 - **App changes**:
-  - collection moves to background threads, so the UI never waits on the network (R6);
+  - collection is non-blocking, and data that stops arriving is marked stale (R6);
   - process identity becomes `(space, pid)`, because containers in a pod each have their own
     PID 1 (R5).
 
@@ -27,19 +29,25 @@
 **Language/Version**: Rust stable (1.99), edition 2024
 
 **Primary Dependencies**:
-- existing: ratatui 0.30, crossterm 0.29, clap 4, procfs-core, nix, serde;
-- **new**: `serde_json` (parse `kubectl -o json`);
-- **external tool**: `kubectl` on PATH.
+- existing: ratatui 0.30, crossterm 0.29, clap 4, procfs-core, nix, serde.
+- **new, optional under the `kube` feature (default on)**:
+  - `kube` (`client`, `runtime`, `ws`, `rustls-tls`);
+  - `k8s-openapi` (pinned Kubernetes API version feature);
+  - `tokio` (`rt`, `macros`, `time`, `io-util`, `sync`);
+  - `futures`;
+  - `serde_json`.
+- **dev**: `tower-test` and `http`, for the mocked API server.
 
 **Storage**: N/A (in-memory session state)
 
 **Testing**:
-- `cargo test`: unit tests plus insta snapshots from fixtures, with recorded reader output and
-  kubectl JSON under `tests/fixtures/kube/`;
+- `cargo test`: unit tests and insta snapshots, fixture-driven. Covers reader frames, pod and
+  node JSON, cgroup paths, and the kube thread against a mocked API service.
+- `cargo test --no-default-features`: proves the local-only build still works.
 - opt-in `make kube-e2e` on a local `kind` cluster.
 
 **Target Platform**:
-- rtop host: macOS and Linux;
+- rtop host: macOS and Linux.
 - targets: Linux pods and nodes, cgroup v2 primary.
 
 **Project Type**: single-binary CLI/TUI
@@ -47,14 +55,14 @@
 **Performance Goals**:
 - pod view < 5 s and node view < 10 s to first table (SC-001);
 - ≤ 1% of one core added on the target at a 2 s tick (SC-003);
-- rtop's own idle CPU stays about 1%.
+- rtop's own idle CPU stays about 1%, and the kube thread idles in epoll/kqueue.
 
 **Constraints**:
-- UI thread never blocks on kubectl;
-- only `--context` passed explicitly;
+- the UI thread never awaits or blocks on the network;
+- the context is resolved once and always shown;
 - read-only by default;
-- nothing added to pods unless the fallback or node mode needs it, and then labelled and
-  bounded in lifetime.
+- cluster additions only when needed, labelled and bounded in lifetime;
+- local-only build possible without tokio.
 
 **Scale/Scope**: pods with 1–10 containers; nodes with up to about 1000 processes; one target
 per run.
@@ -63,35 +71,24 @@ per run.
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
+Checked against constitution **v1.2.0**. That amendment comes from this plan: the network clause
+names rtop's Kubernetes module instead of kubectl, and heavy dependencies are allowed behind an
+optional feature.
+
 | Principle / rule | Status | Notes |
 |---|---|---|
-| I. Provenance | ✅ | Each source is prefixed `[pod/container]`, `[… via debug container …]` or `[node/host]`, and the detail view shows the kubectl command (R11). |
-| II. Teach first | ✅ | New explain entries: container column, cgroup limits, throttling, OOM, "meminfo shows the node", ephemeral containers, hostPID (FR-014). |
-| III. Both platforms | ✅ | Kubernetes mode runs from macOS and Linux hosts. All parsing (wire, attribution, kubectl JSON) is pure and tested on every OS. |
-| IV. Deterministic tests | ✅ | Fixtures under `tests/fixtures/kube/`; the fixture collector gains a pod target for snapshots; the cluster test is opt-in. |
-| V. Cheap and safe: CPU, no blocking | ✅ | Background workers, latest-value cache, `Pending` details (R6). |
-| V. Cheap and safe: no `fork` | ✅ | kubectl runs through `Command` (spawn and exec), like the lab re-exec. |
-| V. "read-only except signal, renice, labs" | ✅ (v1.1.0) | Node mode creates and deletes a helper pod; the fallback patches `pods/ephemeralcontainers`. |
-| Tech: "No network access at runtime" | ✅ (v1.1.0) | Kubernetes mode talks to the API server, which is the feature. |
-| Tech: minimal dependencies | ✅ | Only `serde_json`; kube-rs rejected (R1). |
-| Tech: UI and colour rules | ✅ | New CONTAINER/POD columns and picker use theme colours; selection is a background highlight, no edge stripes. |
+| I. Provenance | ✅ | Sources are prefixed `[pod/container]`, `[… via debug container …]` or `[node/host]`; the detail view shows the equivalent `kubectl exec` (R11). |
+| II. Teach first | ✅ | New explain entries: container, limits, throttling, OOM, "meminfo shows the node", ephemeral containers, hostPID (FR-014). |
+| III. Both platforms | ✅ | Kubernetes mode runs from macOS and Linux hosts; all parsing and conversion is pure and tested on every OS. |
+| IV. Deterministic tests | ✅ | Fixtures plus a mocked API service; kind is opt-in. |
+| V. Cheap and safe: CPU, no blocking | ✅ | Async isolated on one thread; the UI only calls `try_recv`; `Pending` details (R6). |
+| V. Cheap and safe: no `fork` | ✅ | No processes are spawned at all; the kube work is a thread. |
+| V. Cluster additions (v1.1.0) | ✅ | Debug container and helper pod are labelled, bounded, announced, and can be disabled (`--no-debug-container`; node mode is opt-in by flag). |
+| Tech: network only via rtop's Kubernetes module, to the selected context (v1.2.0) | ✅ | One client per run, built from the resolved context. |
+| Tech: dependency rule (v1.2.0) | ✅ | Heavy dependencies only under the `kube` feature; `--no-default-features` builds without them (T005 checks this). |
+| Tech: UI and colour rules | ✅ | CONTAINER/POD columns and the picker use theme colours; selection is a background highlight. |
 
-**Gate result: pass after constitution amendment v1.1.0 (applied 2026-10-29).** Both conflicts are
-permanent properties of this feature, not one-off exceptions, so the right fix is a MINOR
-amendment (v1.0.0 → v1.1.0) via `/speckit-constitution`:
-
-- Technical Constraints: "No network access at runtime" becomes:
-  > No network access at runtime, except Kubernetes mode, which talks only to the API server of
-  > the kubeconfig context the user selected, through `kubectl`. No telemetry.
-- Principle V: "rtop is read-only except for explicit user actions (signal, renice) and labs"
-  becomes:
-  > … and labs. In Kubernetes mode, rtop may add only what reading requires (an ephemeral debug
-  > container, a node helper pod). Each addition is labelled as rtop's, has a bounded lifetime,
-  > is announced to the user, and can be disabled.
-
-Post-design re-check (after Phase 1): no new violations. The design stays inside the amended
-wording: helper pod with label and `activeDeadlineSeconds`, debug container with `sleep 3600`
-and a notice, and `--no-debug-container`.
+**Gate result: pass.** Post-design re-check: no new violations.
 
 ## Project Structure
 
@@ -106,73 +103,74 @@ specs/001-k8s-targets/
 ├── quickstart.md        # kind-based end-to-end validation
 ├── contracts/
 │   ├── cli.md           # flags, defaults, exit messages
+│   ├── kube-messages.md # Request / Reply / Event enums between UI side and kube thread
 │   ├── reader-wire.md   # framed request/response protocol of the sh reader
 │   ├── rbac.yaml        # minimum Role/ClusterRole per mode
 │   └── helper-pod.yaml  # node helper manifest
 ├── checklists/requirements.md
-└── tasks.md             # /speckit-tasks (not yet created)
+└── tasks.md
 ```
 
 ### Source Code (repository root)
 
 ```text
+Cargo.toml               # [features] default = ["kube"]; optional kube deps
 src/
-├── main.rs              # + --pod/--node/--kube flags, mode selection (contracts/cli.md)
+├── main.rs              # + --pod/--node/--kube flags (cfg feature "kube"), mode selection
 ├── model.rs             # + ProcId, Process.space, Process.origin, Target
 ├── app.rs               # Pid → ProcId keys; container filter; Pending details; stale banner
 ├── collector/
 │   ├── mod.rs           # Collector trait: details(ProcId), target(), Pending error
-│   ├── linux.rs         # unchanged behaviour; uses ProcId{space:0}
-│   ├── linux_parse.rs   # reused as-is by the remote path (+ cgroup usage parsers)
-│   ├── fixture.rs       # + a pod-mode fixture (two containers, two PID 1s)
-│   └── kube.rs          # KubeCollector: merges session samples into Snapshot
-├── kube/
-│   ├── mod.rs           # Target resolution, context check
-│   ├── kubectl.rs       # spawn helpers, JSON → PodInfo/NodeIndex (serde_json)
-│   ├── session.rs       # long-lived exec session + worker thread, backoff, state machine
-│   ├── reader.sh        # embedded POSIX sh reader (include_str!)
-│   ├── wire.rs          # pure frame parser → Sample / detail files
-│   ├── attribution.rs   # pure cgroup path → (pod uid, container id)
-│   ├── ephemeral.rs     # probe, create/reuse debug container
-│   └── helper.rs        # node helper pod lifecycle and cleanup
+│   ├── linux.rs         # unchanged behaviour; space 0
+│   ├── linux_parse.rs   # reused by the remote path (+ cgroup usage parsers)
+│   ├── fixture.rs       # + pod- and node-mode fixtures
+│   └── kube.rs          # KubeCollector (sync): sessions, merge into Snapshot
+├── kube/                # #[cfg(feature = "kube")] except the pure parts
+│   ├── mod.rs           # spawn the kube thread, channels, catch_unwind + restart
+│   ├── msg.rs           # Request / Reply / Event / KubeError (contracts/kube-messages.md)
+│   ├── client.rs        # async handlers: hello, get/list, watchers, exec streams
+│   ├── convert.rs       # pure: k8s_openapi types → PodInfo, NodeIndex, summaries
+│   ├── ephemeral.rs     # probe, reuse/append debug container
+│   ├── helper.rs        # helper pod manifest (pure) + lifecycle, GC, exit/panic hooks
+│   ├── session.rs       # sync side of a reader session: request seq, frames → Sample, backoff
+│   ├── wire.rs          # pure frame parser (always compiled, tested everywhere)
+│   ├── attribution.rs   # pure cgroup path → (pod uid, container id) (always compiled)
+│   └── reader.sh        # embedded POSIX sh reader
 └── ui/
-    ├── table.rs         # CONTAINER / POD columns when target is Kubernetes
-    ├── header.rs        # target line, container usage vs limits card, stale marker
+    ├── table.rs         # CONTAINER / POD columns when a target is set
+    ├── header.rs        # target line, container usage card, stale marker
     └── picker.rs        # pod/node picker (Story 3)
 
 tests/
-├── fixtures/kube/       # hello.bin, snap-pod.bin, snap-node.bin, details.bin, pod.json, pods-on-node.json, cgroup-paths.txt
-├── kube/workloads.yaml  # kind sample workloads for quickstart / make kube-e2e
-└── ui.rs                # + pod-mode snapshots (container column, two PID 1s, stale banner)
+├── fixtures/kube/       # *.bin reader captures, pod.json, pod-shared.json, pods-on-node.json, node.json, cgroup-paths.txt
+├── kube/workloads.yaml  # kind sample workloads
+└── ui.rs                # + pod/node-mode snapshots
 
-assets/explain.toml      # + container, pod, origin, cgroup usage, throttling, oom, ephemeral, hostPID entries
-README.md                # Kubernetes mode section, permissions (contracts/rbac.yaml), sources table rows
-Makefile                 # + kube-up / kube-e2e / kube-down (kind, context kind-rtop only)
+assets/explain.toml      # + Kubernetes entries
+README.md                # Kubernetes mode, permissions, sources
+Makefile                 # + kube-up / kube-e2e / kube-down (context kind-rtop only); test runs --no-default-features too
 ```
 
-**Structure Decision**: single crate. Kubernetes code is a new `src/kube/` module plus one
-collector (`collector/kube.rs`) implementing the existing `Collector` trait, so the UI keeps a
-single data path. It is not cfg-gated: it runs on macOS and Linux hosts.
+**Structure Decision**: single crate and single binary. The Kubernetes client is one module
+behind a feature, with the async code confined to `src/kube/client.rs`, `ephemeral.rs` and
+`helper.rs` on its own thread. The pure parsers (`wire`, `attribution`, `convert`, the helper
+manifest) have no tokio dependency and are tested on every OS.
 
 ### Delivery order (maps to user stories)
 
-1. **Foundation**:
-   - `ProcId` refactor across `app.rs` (local behaviour and snapshots unchanged);
-   - the `Pending` details error;
-   - the wire parser and fixtures.
-2. **Story 1 (P1)**: kubectl wrapper, exec session and reader, KubeCollector for pods
-   (one session per container, CONTAINER column, container filter); then the ephemeral
-   fallback; then `shareProcessNamespace` attribution.
-3. **Story 2 (P2)**: helper pod lifecycle, attribution, NodeIndex, POD column.
-4. **Story 3 (P3)**: picker.
-5. **Story 4 (P4)**: container usage vs limits card, explain entries.
-6. **Polish**: README permissions and sources, `make kube-e2e`, `--allow-actions` with
-   confirmation prompts.
+1. **Foundation**: the `ProcId` refactor (local snapshots unchanged), `Pending` details, the wire
+   parser, and the feature-gated dependencies with the kube-thread skeleton.
+2. **Story 1 (P1)**: pod sessions (exec), CONTAINER column, container filter; then the
+   ephemeral fallback; then `shareProcessNamespace`.
+3. **Story 2 (P2)**: helper pod, attribution, node index watcher, POD column.
+4. **Story 4 (P4)**: container usage card and explain entries. It ranks above the picker for
+   learning value.
+5. **Story 3 (P3)**: picker.
+6. **Polish**: README, e2e target, measurements.
 
 ## Complexity Tracking
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| Network access at runtime (Kubernetes mode) | The feature is reading remote pods and nodes through the API server | None exists: the spec forbids SSH, and local-only cannot see a cluster. Resolved by the proposed amendment, not by exception. |
-| Writes to the cluster (ephemeral container, helper pod) | Distroless images have no reader tools; nodes have no exec endpoint without a pod | Exec-only fails on distroless (spec Q1 chose C). `kubectl debug node` gives no label or deadline control. Writes are labelled, bounded and can be disabled. |
-| Process identity `(space, pid)` instead of `pid` | Containers in one pod have separate PID namespaces, each with its own PID 1 | Renumbering PIDs would break provenance (the PID shown must be the real one in its namespace) and `kill`. |
+| Async runtime (tokio) inside a sync TUI | kube-rs is async; exec streams and watchers are long-lived sockets | Blocking HTTP would need a hand-written exec stream (WebSocket) and watch handling. A Go adapter or kubectl subprocesses add a second language or an external tool and a stringly protocol (R1). Contained to one thread and one feature. |
+| Process identity `(space, pid)` instead of `pid` | Containers in a pod have separate PID namespaces, each with its own PID 1 | Renumbering PIDs would break provenance and `kill`. |

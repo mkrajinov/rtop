@@ -16,11 +16,10 @@ rtop --kube [-n NS] [--context CTX]          # picker (Story 3)
 | `--kube` | | Open the pod and node picker. |
 | `-n, --namespace NS` | kubeconfig namespace, else `default` | Pod namespace; picker namespace. |
 | `--helper-namespace NS` | `-n` value | Where the node helper pod is created. |
-| `--context CTX` | kubeconfig current context | Resolved once; passed to every kubectl call. |
+| `--context CTX` | kubeconfig current context | Resolved once when the client is built; no other context is used. Always shown in the header, highlighted when it was not given explicitly. |
 | `--debug-image IMAGE` | `busybox:1.37` | Image for the debug container and the helper pod. |
 | `--no-debug-container` | off | Never add an ephemeral container; unreadable containers are reported instead. |
 | `--allow-actions` | off | Enable signals and renice in Kubernetes mode (FR-011). |
-| `--kubectl PATH` | `kubectl` on PATH | kubectl binary to use. |
 | `-d, --delay SECS` | 2.0 in Kubernetes mode (1.5 locally) | Refresh interval. |
 
 Rules:
@@ -33,7 +32,8 @@ Exit messages (FR-012), one line each plus the next step:
 
 | Situation | Message starts with |
 |---|---|
-| kubectl missing | `kubectl not found` (`--kubectl` hint) |
+| built without the `kube` feature | `this rtop was built without Kubernetes support` (rebuild with default features) |
+| no kubeconfig / login plugin failed | `kubeconfig: …` / `credentials for <ctx>: …` |
 | context unknown or unreachable | `context <ctx>: …` |
 | RBAC denied | `forbidden: <verb> <resource> in <ns>` (link to README permissions) |
 | pod not Running / node not Ready | `pod <ns/name> is <phase>: <reason>` / `node <name> is NotReady` |

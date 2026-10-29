@@ -4,8 +4,9 @@ Every command passes `--context kind-rtop`. Never run these against another cont
 
 ## Prerequisites
 
-- Docker running; `kind` and `kubectl` on PATH (both installed on the dev Mac).
-- rtop built: `cargo build --release`.
+- Docker running; `kind` and `kubectl` on PATH (kubectl only checks results; rtop does not
+  use it).
+- rtop built with default features (Kubernetes included): `cargo build --release`.
 
 ## 1. Cluster and sample workloads
 
