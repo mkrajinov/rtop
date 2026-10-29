@@ -32,6 +32,9 @@ pub fn process(pid: Pid, ppid: Pid, name: &str) -> Process {
 
 pub struct FixtureCollector {
     pub snapshot: Snapshot,
+    /// Pretend to read a Kubernetes target.
+    pub target: Option<Target>,
+    pub link: Option<Link>,
 }
 
 impl Default for FixtureCollector {
@@ -85,7 +88,10 @@ impl Default for FixtureCollector {
                     },
                 },
                 processes: vec![init, shell, hog, zombie],
+                clock: None,
             },
+            target: None,
+            link: None,
         }
     }
 }
@@ -97,6 +103,14 @@ impl Collector for FixtureCollector {
 
     fn snapshot(&mut self) -> Snapshot {
         self.snapshot.clone()
+    }
+
+    fn target(&self) -> Option<&Target> {
+        self.target.as_ref()
+    }
+
+    fn link(&self) -> Option<Link> {
+        self.link.clone()
     }
 
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {

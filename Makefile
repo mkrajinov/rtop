@@ -55,7 +55,9 @@ KUBE_CTX := kind-rtop
 
 kube-up:
 	kind get clusters | grep -qx rtop || kind create cluster --name rtop
-	kubectl --context $(KUBE_CTX) apply -f tests/kube/workloads.yaml
+	@# A new namespace gets its default service account a moment later, and
+	@# pods are refused until then: retry the apply.
+	for i in 1 2 3 4 5; do kubectl --context $(KUBE_CTX) apply -f tests/kube/workloads.yaml && break; sleep 2; done
 	kubectl --context $(KUBE_CTX) -n rtop-demo wait --for=condition=Ready pod --all --timeout=180s
 
 kube-e2e: kube-up

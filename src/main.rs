@@ -13,15 +13,30 @@ use rtop::{collector, labs, ui};
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
-    /// Refresh interval in seconds.
-    #[arg(short, long, default_value_t = 1.5)]
-    delay: f32,
+    /// Refresh interval in seconds [default: 1.5, or 2 in Kubernetes mode].
+    #[arg(short, long)]
+    delay: Option<f32>,
     /// Colour theme (overrides the config file).
     #[arg(long, alias = "gray", value_parser = clap::builder::PossibleValuesParser::new(ui::theme::THEMES.iter().map(|t| t.name)))]
     theme: Option<String>,
     /// Accent colour (overrides the config file).
     #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(ui::theme::ACCENTS.iter().map(|a| a.name)))]
     accent: Option<String>,
+    /// Kubernetes: show the processes of every container of this pod.
+    #[arg(long, value_name = "[NAMESPACE/]POD", help_heading = "Kubernetes")]
+    pod: Option<String>,
+    /// Start narrowed to one container of the pod (C switches inside rtop).
+    #[arg(short = 'c', long, requires = "pod", help_heading = "Kubernetes")]
+    container: Option<String>,
+    /// Namespace of the pod [default: the context's namespace].
+    #[arg(short = 'n', long, requires = "pod", help_heading = "Kubernetes")]
+    namespace: Option<String>,
+    /// kubeconfig context to use [default: the current context].
+    #[arg(long, requires = "pod", help_heading = "Kubernetes")]
+    context: Option<String>,
+    /// Allow sending signals to processes in the pod (read-only otherwise).
+    #[arg(long, requires = "pod", help_heading = "Kubernetes")]
+    allow_actions: bool,
 }
 
 #[derive(Subcommand)]
@@ -39,9 +54,13 @@ enum Cmd {
 }
 
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    let kube_mode = cli.pod.is_some();
+    if kube_mode && cli.command.is_some() {
+        bail!("labs and inspect are not available in Kubernetes mode");
+    }
     let mut lab = None;
-    match cli.command {
+    match cli.command.take() {
         Some(Cmd::LabWorker { name }) => return labs::worker::run(&name),
         Some(Cmd::Inspect { pid }) => return inspect(pid),
         Some(Cmd::Lab { name: None }) => {
@@ -67,8 +86,16 @@ fn main() -> anyhow::Result<()> {
     ui::theme::set_by_name(cfg.theme.as_deref(), cfg.accent.as_deref());
     ui::theme::set_by_name(cli.theme.as_deref(), cli.accent.as_deref());
 
-    let mut app = App::new(collector::native());
-    app.tick = std::time::Duration::from_secs_f32(cli.delay.max(0.2));
+    let delay = cli.delay.unwrap_or(if kube_mode { 2.0 } else { 1.5 }).max(0.2);
+    let tick = Duration::from_secs_f32(delay);
+    let collector = match &cli.pod {
+        Some(pod) => kube_collector(&cli, pod, tick)?,
+        None => collector::native(),
+    };
+    let mut app = App::new(collector);
+    app.tick = tick;
+    app.container = cli.container.clone();
+    app.allow_actions = cli.allow_actions;
     if let Some(l) = lab {
         app = app.with_lab(l);
     }
@@ -131,6 +158,25 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
         }
     }
     Ok(())
+}
+
+/// Connect to the pod before the TUI starts, so errors print as plain
+/// one-line messages (contracts/cli.md).
+#[cfg(feature = "kube")]
+fn kube_collector(cli: &Cli, pod: &str, tick: Duration) -> anyhow::Result<Box<dyn collector::Collector>> {
+    use collector::kube::{KubeCollector, PodOptions};
+    let (namespace, pod) = match pod.split_once('/') {
+        Some((ns, name)) => (Some(ns.to_string()), name.to_string()),
+        None => (cli.namespace.clone(), pod.to_string()),
+    };
+    eprintln!("connecting to {} …", cli.context.as_deref().unwrap_or("the current context"));
+    let opts = PodOptions { context: cli.context.clone(), namespace, pod, tick };
+    Ok(Box::new(KubeCollector::connect(opts)?))
+}
+
+#[cfg(not(feature = "kube"))]
+fn kube_collector(_: &Cli, _: &str, _: Duration) -> anyhow::Result<Box<dyn collector::Collector>> {
+    bail!("this rtop was built without Kubernetes support: rebuild with default features (cargo build --release)")
 }
 
 fn inspect(pid: i32) -> anyhow::Result<()> {

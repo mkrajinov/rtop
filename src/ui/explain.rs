@@ -15,7 +15,8 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(Paragraph::new(format!("No entry for '{key}' yet.")).block(panel("explain")), area);
         return;
     };
-    let linux_here = app.collector.platform() == "Linux";
+    // A Kubernetes target is a Linux machine too.
+    let linux_here = matches!(app.collector.platform(), "Linux" | "Kubernetes");
     let mut lines = vec![Line::from(Span::styled(e.title.clone(), theme::title())), Line::raw("")];
 
     // What exactly is selected right now, and where its value came from.
@@ -38,6 +39,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 crate::app::Column::Time => crate::fmt::cpu_time(p.cpu_time_ns),
                 crate::app::Column::User => format!("{} (uid {})", p.user, p.uid),
                 crate::app::Column::Pid => p.pid.to_string(),
+                crate::app::Column::Container => crate::app::container(p).to_string(),
                 crate::app::Column::Command => p.cmdline.clone(),
             };
             (format!("PID {} ({}): {v}", p.pid, p.name), String::new())

@@ -75,36 +75,40 @@ exec first, debug container fallback.
 
 ### Tests for User Story 1
 
-- [ ] T018 [P] [US1] Unit tests for `convert::pod_info` (k8s_openapi `Pod` → `PodInfo`: containers, statuses, ephemeral containers, shareProcessNamespace) against tests/fixtures/kube/pod.json and pod-shared.json in src/kube/convert.rs
-- [ ] T019 [P] [US1] Snapshot test in tests/ui.rs: pod-mode fixture with containers `app` and `sidecar`, two PID 1 rows, CONTAINER column and target header line
-- [ ] T020 [P] [US1] Unit test in src/collector/kube.rs: merging two session samples gives distinct `ProcId`s, and the tree does not link across spaces
+- [X] T018 [P] [US1] Unit tests for `convert::pod_info` (k8s_openapi `Pod` → `PodInfo`: containers, statuses, ephemeral containers, shareProcessNamespace) against tests/fixtures/kube/pod.json and pod-shared.json in src/kube/convert.rs
+- [X] T019 [P] [US1] Snapshot test in tests/ui.rs: pod-mode fixture with containers `app` and `sidecar`, two PID 1 rows, CONTAINER column and target header line
+- [X] T020 [P] [US1] Unit test in src/collector/kube.rs: merging two session samples gives distinct `ProcId`s, and the tree does not link across spaces
 
 ### Implementation for User Story 1
 
-- [ ] T021 [US1] Pod handlers in src/kube/client.rs, each with a mock test from T017:
+- [X] T021 [US1] Pod handlers in src/kube/client.rs, each with a mock test from T017:
   - `GetPod`;
   - `WatchPod` (a `kube::runtime::watcher` emitting `Event::Pod` and `Event::PodDeleted`);
   - `ExecOpen`, `StreamWrite` and `StreamClose` via `Api::<Pod>::exec` (ws), writing `stdin_init` first and forwarding stdout as `Event::StreamData` and the end as `Event::StreamClosed` with the exit status;
   - stderr goes to the kube log ring buffer.
-- [ ] T022 [US1] Write the POSIX sh reader in src/kube/reader.sh implementing `hello`, `snap`, `cmd`, `details`, `bye` per contracts/reader-wire.md; uid from the `Uid:` line, fd count via `set -- /proc/$p/fd/*`
-- [ ] T023 [US1] Sync side of a session in src/kube/session.rs:
+  - Done: `GetPod` and `WatchPod` have mock tests. Exec needs a WebSocket upgrade that
+    `tower_test` cannot fake, so the session loop (`pump`) is tested on `tokio::io::duplex`
+    pipes and the real exec was checked on kind. The last 512 bytes of stderr go into the
+    `StreamClosed` error instead of a ring buffer.
+- [X] T022 [US1] Write the POSIX sh reader in src/kube/reader.sh implementing `hello`, `snap`, `cmd`, `details`, `bye` per contracts/reader-wire.md; uid from the `Uid:` line, fd count via `set -- /proc/$p/fd/*`
+- [X] T023 [US1] Sync side of a session in src/kube/session.rs:
   - send `ExecOpen` with reader.sh;
   - send `snap <seq>` each tick;
   - feed `StreamData` bytes to `wire.rs` and keep `latest`;
   - state machine Probing→Starting→Live→Stale with backoff 1–30 s;
   - `details` requests with a 5 s timeout.
-- [ ] T024 [US1] Build `LinuxEnv` and the uid→name map from `hello` frames (passwd, pagesize, btime; ticks = 100) in src/kube/session.rs
-- [ ] T025 [US1] Implement KubeCollector for pods in src/collector/kube.rs: one session per running container; `snapshot()` merges the latest samples via `linux_parse::process_row` and `linux_parse::system`; fetches cmdlines for new `(ProcId, starttime)` through `cmd`; sets `origin.container`
-- [ ] T026 [US1] `details(ProcId)` in src/collector/kube.rs: route to the session, return `Pending` while in flight, build `ProcFiles` from frames, call `linux_parse::details`, prefix each provenance with `[pod/container]` and add the equivalent `kubectl exec` command (research R11)
-- [ ] T027 [US1] Add flags `--pod`, `-c/--container`, `-n/--namespace`, `--context` and the Kubernetes default `-d` of 2.0 to src/main.rs, gated on `cfg(feature = "kube")`, per contracts/cli.md; reject `lab` in Kubernetes mode; send `Shutdown` on exit and from the panic hook
-- [ ] T028 [US1] CONTAINER column (shown only when a target is set) and a container filter key in src/ui/table.rs and src/app.rs (FR-005)
-- [ ] T029 [US1] Target line `context · ns/pod · node` (context highlighted when not given explicitly) and a stale marker with age in src/ui/header.rs (FR-008, FR-012)
+- [X] T024 [US1] Build `LinuxEnv` and the uid→name map from `hello` frames (passwd, pagesize, btime; ticks = 100) in src/kube/session.rs
+- [X] T025 [US1] Implement KubeCollector for pods in src/collector/kube.rs: one session per running container; `snapshot()` merges the latest samples via `linux_parse::process_row` and `linux_parse::system`; fetches cmdlines for new `(ProcId, starttime)` through `cmd`; sets `origin.container`
+- [X] T026 [US1] `details(ProcId)` in src/collector/kube.rs: route to the session, return `Pending` while in flight, build `ProcFiles` from frames, call `linux_parse::details`, prefix each provenance with `[pod/container]` and add the equivalent `kubectl exec` command (research R11)
+- [X] T027 [US1] Add flags `--pod`, `-c/--container`, `-n/--namespace`, `--context` and the Kubernetes default `-d` of 2.0 to src/main.rs, gated on `cfg(feature = "kube")`, per contracts/cli.md; reject `lab` in Kubernetes mode; send `Shutdown` on exit and from the panic hook
+- [X] T028 [US1] CONTAINER column (shown only when a target is set) and a container filter key in src/ui/table.rs and src/app.rs (FR-005)
+- [X] T029 [US1] Target line `context · ns/pod · node` (context highlighted when not given explicitly) and a stale marker with age in src/ui/header.rs (FR-008, FR-012)
 - [ ] T030 [US1] `Probe` and `EnsureDebugContainer` in src/kube/ephemeral.rs, with mock tests (reuse vs append, `Unsupported` when disabled):
   - probe with `command -v cat`, treating exit 127 or "not found" as missing;
   - reuse a running `rtop-<c>-*`, or patch the `ephemeralcontainers` subresource with `targetContainerName`, the debug image, `sleep 3600` and `SYS_PTRACE`;
   - wait for running;
   - `--debug-image` and `--no-debug-container` flags, and the user notice (FR-003).
-- [ ] T031 [US1] `shareProcessNamespace` in src/collector/kube.rs: a single session, with container attribution via `/proc/<pid>/cgroup` matched to `containerStatuses[].containerID`, and a `pause` label (research R4)
+- [X] T031 [US1] `shareProcessNamespace` in src/collector/kube.rs: a single session, with container attribution via `/proc/<pid>/cgroup` matched to `containerStatuses[].containerID`, and a `pause` label (research R4)
 - [ ] T032 [US1] Handle pod gone, restarted (new restart count) and not Running, with a reattach offer, in src/collector/kube.rs and src/app.rs (spec edge cases)
 - [ ] T033 [US1] Read-only by default: disable `k` and `+`/`-` unless `--allow-actions`; with it, send `kill`/`renice` requests through the session and confirm with the target named, in src/app.rs (FR-011)
 - [ ] T034 [US1] Validate quickstart.md §2–§4 on kind; replace the placeholder fixtures in tests/fixtures/kube/ with real captures

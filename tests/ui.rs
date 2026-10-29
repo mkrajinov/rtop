@@ -126,3 +126,45 @@ fn same_pid_in_two_namespaces_stays_apart() {
         assert!(names[i + 1].ends_with(&format!("{child}@{space}")), "{names:?}");
     }
 }
+
+/// A pod with containers `app` and `sidecar`: CONTAINER column, the target
+/// line above the cards, and `C` narrowing to one container.
+#[test]
+fn pod_mode_shows_containers_and_target() {
+    use rtop::collector::fixture::process;
+    use rtop::model::{Link, Origin, Target};
+    let mut c = FixtureCollector::default();
+    c.snapshot.processes.clear();
+    for (space, container, cmd) in [(1, "app", "nginx -g daemon off;"), (2, "sidecar", "envoy -c /etc/envoy.yaml")] {
+        let origin = Some(Origin { pod: None, container: container.into() });
+        let mut root = process(1, 0, cmd.split(' ').next().unwrap());
+        root.cmdline = cmd.into();
+        root.space = space;
+        root.origin = origin.clone();
+        let mut child = process(7, 1, "worker");
+        child.space = space;
+        child.origin = origin;
+        c.snapshot.processes.extend([root, child]);
+    }
+    c.target = Some(Target::Pod {
+        context: "kind-rtop".into(),
+        namespace: "rtop-demo".into(),
+        pod: "multi".into(),
+        node: Some("rtop-control-plane".into()),
+        container: None,
+    });
+    c.link = Some(Link { implicit_context: false, stale: None, notes: vec![] });
+    let mut app = App::new(Box::new(c));
+    app.refresh();
+    let screen = render(&mut app, 130, 16);
+    assert!(screen.contains("kind-rtop · rtop-demo/multi · node rtop-control-plane"), "{screen}");
+    assert!(screen.contains("CONTAINER"), "{screen}");
+    insta::assert_snapshot!(screen);
+
+    press(&mut app, KeyCode::Char('C'));
+    assert_eq!(app.rows.len(), 2);
+    assert!(app.rows.iter().all(|r| rtop::app::container(&app.snapshot.processes[r.idx]) == "app"));
+    // Signals stay off without --allow-actions.
+    press(&mut app, KeyCode::Char('k'));
+    assert_eq!(app.mode, rtop::app::Mode::Table);
+}

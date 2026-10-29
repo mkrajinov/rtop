@@ -10,7 +10,7 @@ use ratatui::widgets::Paragraph;
 use super::{panel, theme};
 use crate::app::App;
 use crate::fmt;
-use crate::model::{Battery, Fan, IoCounters, ProcState};
+use crate::model::{Battery, Fan, IoCounters, ProcState, Target};
 
 /// Rows inside each card.
 const INNER: usize = 5;
@@ -441,4 +441,44 @@ fn draw_sys(f: &mut Frame, app: &App, area: Rect) {
         fans(&sys.thermal.fans),
     ];
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The line above the cards in Kubernetes mode: which cluster, pod and node
+/// this is (FR-008), whether the data is stale and what rtop changed or
+/// could not read (FR-012).
+pub fn draw_target(f: &mut Frame, app: &App, area: Rect) {
+    let Some(target) = app.collector.target() else { return };
+    let link = app.collector.link().unwrap_or_default();
+    let p = theme::pal();
+    // A context taken from the kubeconfig may not be the cluster you meant.
+    let ctx_style = if link.implicit_context {
+        Style::default().fg(p.warn).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
+    };
+    let sep = || Span::styled(" · ", theme::faint());
+    let mut spans = vec![Span::styled("⎈ ", Style::default().fg(p.accent))];
+    match target {
+        Target::Pod { context, namespace, pod, node, .. } => {
+            spans.push(Span::styled(context.clone(), ctx_style));
+            if link.implicit_context {
+                spans.push(Span::styled(" (current context)", Style::default().fg(p.warn)));
+            }
+            spans.extend([sep(), Span::styled(format!("{namespace}/{pod}"), theme::bold())]);
+            if let Some(n) = node {
+                spans.extend([sep(), Span::styled(format!("node {n}"), theme::dim())]);
+            }
+        }
+        Target::Node { context, node } => {
+            spans.push(Span::styled(context.clone(), ctx_style));
+            spans.extend([sep(), Span::styled(format!("node {node}"), theme::bold())]);
+        }
+    }
+    if let Some(age) = link.stale {
+        spans.extend([sep(), Span::styled(format!("stale {}s", age.as_secs()), Style::default().fg(p.bad))]);
+    }
+    for n in &link.notes {
+        spans.extend([sep(), Span::styled(n.clone(), Style::default().fg(p.warn))]);
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

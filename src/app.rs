@@ -16,6 +16,8 @@ use crate::ui::theme;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Column {
     Pid,
+    /// Only shown for a Kubernetes target.
+    Container,
     User,
     State,
     Pri,
@@ -31,8 +33,9 @@ pub enum Column {
 }
 
 impl Column {
-    pub const ALL: [Column; 13] = [
+    pub const ALL: [Column; 14] = [
         Column::Pid,
+        Column::Container,
         Column::User,
         Column::State,
         Column::Pri,
@@ -50,6 +53,7 @@ impl Column {
     pub fn title(self) -> &'static str {
         match self {
             Column::Pid => "PID",
+            Column::Container => "CONTAINER",
             Column::User => "USER",
             Column::State => "S",
             Column::Pri => "PRI",
@@ -69,6 +73,7 @@ impl Column {
     pub fn key(self) -> &'static str {
         match self {
             Column::Pid => "pid",
+            Column::Container => "container",
             Column::User => "uid",
             Column::State => "state",
             Column::Pri => "priority",
@@ -86,12 +91,13 @@ impl Column {
 
     /// Numeric columns sort largest-first by default.
     fn default_desc(self) -> bool {
-        !matches!(self, Column::Pid | Column::User | Column::Command | Column::State)
+        !matches!(self, Column::Pid | Column::Container | Column::User | Column::Command | Column::State)
     }
 
     fn cmp(self, a: &Process, b: &Process) -> std::cmp::Ordering {
         match self {
             Column::Pid => a.pid.cmp(&b.pid),
+            Column::Container => container(a).cmp(container(b)),
             Column::User => a.user.cmp(&b.user),
             Column::State => a.state.letter().cmp(&b.state.letter()),
             Column::Pri => a.priority.cmp(&b.priority),
@@ -106,6 +112,11 @@ impl Column {
         }
         .then(a.pid.cmp(&b.pid))
     }
+}
+
+/// The container a process runs in; empty in local mode.
+pub fn container(p: &Process) -> &str {
+    p.origin.as_ref().map_or("", |o| &o.container)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,6 +308,11 @@ pub struct App {
     theme_before: (usize, usize),
     pub status: Option<(String, Instant)>,
     pub lab: Option<LabSession>,
+    /// Kubernetes mode: show only this container's processes (`-c`, `C`).
+    pub container: Option<String>,
+    /// Kubernetes mode: signals are off unless rtop was started with
+    /// `--allow-actions` (FR-011).
+    pub allow_actions: bool,
     pub tick: Duration,
     pub quit: bool,
 }
@@ -338,6 +354,8 @@ impl App {
             theme_before: (0, 0),
             status: None,
             lab: None,
+            container: None,
+            allow_actions: false,
             tick: Duration::from_millis(1500),
             quit: false,
         }
@@ -359,7 +377,15 @@ impl App {
             return;
         }
         let mut snap = self.collector.snapshot();
-        let now = Instant::now();
+        // A remote collector hands out the same sample until a new one
+        // arrives; computing CPU% again would read as 0% for everything.
+        if snap.clock.is_some() && snap.clock == self.snapshot.clock {
+            if self.detail.is_some() {
+                self.reload_detail();
+            }
+            return;
+        }
+        let now = snap.clock.unwrap_or_else(Instant::now);
         self.cpu.update(&mut snap.processes, now);
         self.core_usage = self.cores.update(&snap.system.cores);
         let sys = &snap.system;
@@ -442,12 +468,15 @@ impl App {
         }
 
         let needle = self.filter.to_lowercase();
+        let only = self.container.as_deref();
         let matches = |p: &Process| {
-            needle.is_empty()
-                || p.pid.to_string() == needle
-                || p.cmdline.to_lowercase().contains(&needle)
-                || p.name.to_lowercase().contains(&needle)
-                || p.user.to_lowercase().contains(&needle)
+            only.is_none_or(|c| container(p) == c)
+                && (needle.is_empty()
+                    || p.pid.to_string() == needle
+                    || p.cmdline.to_lowercase().contains(&needle)
+                    || p.name.to_lowercase().contains(&needle)
+                    || p.user.to_lowercase().contains(&needle)
+                    || container(p).to_lowercase().contains(&needle))
         };
         let mut keep: HashSet<ProcId> = procs
             .iter()
@@ -686,9 +715,12 @@ impl App {
                 }
                 self.rebuild();
             }
+            KeyCode::Char('C') if self.collector.target().is_some() => self.next_container(),
             KeyCode::Char('k') if self.selected_process().is_some() => {
-                self.signal_sel = 0;
-                self.mode = Mode::Signal;
+                if !self.remote_blocked() {
+                    self.signal_sel = 0;
+                    self.mode = Mode::Signal;
+                }
             }
             KeyCode::Char('+') | KeyCode::Char('=') => self.renice(1),
             KeyCode::Char('-') => self.renice(-1),
@@ -697,10 +729,47 @@ impl App {
         }
     }
 
+    /// The table's columns: CONTAINER only when reading a Kubernetes target.
+    pub fn columns(&self) -> Vec<Column> {
+        let remote = self.collector.target().is_some();
+        Column::ALL.into_iter().filter(|&c| remote || c != Column::Container).collect()
+    }
+
+    /// `C`: all containers → the first → the next … → all again.
+    fn next_container(&mut self) {
+        let mut names: Vec<&str> = self.snapshot.processes.iter().map(container).filter(|c| !c.is_empty()).collect();
+        names.sort();
+        names.dedup();
+        let next = match self.container.as_deref() {
+            None => names.first(),
+            Some(cur) => names.iter().skip_while(|&&n| n != cur).nth(1),
+        };
+        self.container = next.map(|n| n.to_string());
+        match &self.container {
+            Some(c) => self.set_status(format!("container {c} only · C for the next one")),
+            None => self.set_status("all containers"),
+        }
+        self.rebuild();
+    }
+
+    /// In Kubernetes mode a PID means nothing on this machine: never pass
+    /// it to the local kill(2) or setpriority(2).
+    fn remote_blocked(&mut self) -> bool {
+        if self.collector.target().is_none() {
+            return false;
+        }
+        if !self.allow_actions {
+            self.set_status("read-only: start rtop with --allow-actions to send signals in Kubernetes mode");
+            return true;
+        }
+        false
+    }
+
     fn move_focus(&mut self, delta: isize) {
-        let i = Column::ALL.iter().position(|c| *c == self.focus).unwrap_or(0) as isize;
-        let n = Column::ALL.len() as isize;
-        self.focus = Column::ALL[((i + delta).rem_euclid(n)) as usize];
+        let cols = self.columns();
+        let i = cols.iter().position(|c| *c == self.focus).unwrap_or(0) as isize;
+        let n = cols.len() as isize;
+        self.focus = cols[((i + delta).rem_euclid(n)) as usize];
         self.explain_scroll = 0;
     }
 
@@ -740,6 +809,15 @@ impl App {
                 if let Some(p) = self.selected_process() {
                     let (pid, name) = (p.pid, p.name.clone());
                     let sig = SIGNALS[self.signal_sel].0;
+                    if self.collector.target().is_some() {
+                        let (id, where_) = (p.id(), container(p).to_string());
+                        let msg = match self.collector.signal(id, sig.as_str().trim_start_matches("SIG")) {
+                            Ok(()) => format!("kill -s {sig} {pid} sent in container {where_}"),
+                            Err(e) => format!("kill {pid} in {where_}: {e}"),
+                        };
+                        self.set_status(msg);
+                        return;
+                    }
                     let msg = match nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), sig) {
                         Ok(()) => format!("kill({pid}, {sig}) sent to {name}"),
                         Err(nix::errno::Errno::EPERM) => format!(
@@ -758,6 +836,13 @@ impl App {
     }
 
     fn renice(&mut self, delta: i32) {
+        if self.remote_blocked() {
+            return;
+        }
+        if self.collector.target().is_some() {
+            self.set_status("renice is not available in Kubernetes mode yet");
+            return;
+        }
         let Some(p) = self.selected_process() else { return };
         let (pid, new) = (p.pid, (p.nice + delta).clamp(-20, 19));
         // setpriority(2) returns -1 with errno on failure.

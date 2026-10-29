@@ -14,9 +14,13 @@ pub mod attribution;
 pub mod wire;
 
 #[cfg(feature = "kube")]
-mod client;
+pub(crate) mod client;
+#[cfg(feature = "kube")]
+mod convert;
 #[cfg(feature = "kube")]
 pub mod msg;
+#[cfg(feature = "kube")]
+pub mod session;
 
 #[cfg(feature = "kube")]
 pub use handle::KubeHandle;

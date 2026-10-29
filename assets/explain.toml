@@ -81,6 +81,18 @@ macos = "proc_pidinfo(PROC_PIDVNODEPATHINFO).pvi_cdir. rtop doesn't show it yet;
 try = ["readlink /proc/$$/cwd", "lsof -p $$ -d cwd"]
 man = ["getcwd(3)", "chdir(2)"]
 
+[container]
+title = "CONTAINER — which container of the pod"
+what = "A pod is a group of containers that share a network namespace and volumes, but each container normally gets its own PID namespace. So every container has its own PID 1, and the same PID can appear twice in this table. rtop runs a small sh reader in each container (over the API server's pods/exec) and labels every process with the container it came from. With shareProcessNamespace: true the containers share one PID namespace instead; rtop then tells them apart by the cgroup each process is in, and the pod's pause process (which holds the namespace) shows as 'pause'."
+linux = "Kubernetes mode only. Per container: the reader's /proc. In a shared namespace: the container ID at the end of /proc/<pid>/cgroup, matched with status.containerStatuses[].containerID of the pod."
+macos = "Kubernetes mode reads Linux nodes, even when rtop runs on a Mac."
+pitfalls = [
+  "PID 1 in one container is not PID 1 in another. In the detail view, NSpid in status shows the same process's PID on the node as well.",
+  "Init containers and containers that are not running have no processes; their state is in the pod status (kubectl describe pod).",
+]
+try = ["kubectl exec POD -c CONTAINER -- cat /proc/1/status", "kubectl get pod POD -o jsonpath='{.status.containerStatuses[*].containerID}'", "kubectl exec POD -- cat /proc/self/cgroup"]
+man = ["pid_namespaces(7)", "cgroups(7)"]
+
 [cmdline]
 title = "Command line (argv)"
 what = "The argument vector passed to execve(). The kernel keeps it in the process's own memory, so a process can overwrite it (some daemons rewrite theirs to show status). Kernel threads have no user memory, so tools show their comm in [brackets]."

@@ -1,0 +1,20 @@
+---
+source: tests/ui.rs
+expression: screen
+---
+ ⎈ kind-rtop · rtop-demo/multi · node rtop-control-plane
+ ╭ processes 4 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │     PID  CONTAINER     USER          S     NI        CPU%▼        MEM%     RSS   THR     FD      TIME+  COMMAND              │
+ │       7  app           learner       S      0          0.0  ▏      0.0    4.0M     1      4    0:00.00  worker               │
+ │       7  sidecar       learner       S      0          0.0  ▏      0.0    4.0M     1      4    0:00.00  worker               │
+ │       1  app           learner       S      0          0.0  ▏      0.0    4.0M     1      4    0:00.00  nginx -g daemon off; │
+ │       1  sidecar       learner       S      0          0.0  ▏      0.0    4.0M     1      4    0:00.00  envoy -c /etc/envoy. │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    /  filter    C  container    t  tree    f  family    k

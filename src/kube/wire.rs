@@ -60,13 +60,14 @@ impl Response {
     }
 }
 
-/// One process from a `snap`: the `stat` line, the real UID from `status`,
-/// and the number of open fds (`None` when `fd/` was unreadable).
+/// One process from a `snap`: the `stat` line, the real UID from `status`
+/// (`None` when status was unreadable) and the number of open fds (`None`
+/// when `fd/` was unreadable).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcRecord {
     pub pid: Pid,
     pub stat: String,
-    pub uid: u32,
+    pub uid: Option<u32>,
     pub fds: Option<u32>,
 }
 
@@ -78,9 +79,9 @@ impl ProcRecord {
         // line may itself contain a newline, so split from the end.
         let mut parts = text.trim_end_matches('\n').rsplitn(3, '\n');
         let fds: i64 = parts.next()?.trim().parse().ok()?;
-        let uid = parts.next()?.trim().parse().ok()?;
+        let uid: i64 = parts.next()?.trim().parse().ok()?;
         let stat = parts.next()?.to_string();
-        Some(ProcRecord { pid, stat, uid, fds: u32::try_from(fds).ok() })
+        Some(ProcRecord { pid, stat, uid: u32::try_from(uid).ok(), fds: u32::try_from(fds).ok() })
     }
 }
 
@@ -91,6 +92,19 @@ pub fn links(body: &str) -> Vec<(i32, String)> {
         .filter_map(|l| {
             let mut it = l.strip_prefix("L ")?.splitn(2, ' ');
             Some((it.next()?.parse().ok()?, it.next().unwrap_or("").to_string()))
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+/// `L <name> <target>` lines with any name, e.g. the `ns` frame.
+pub fn named_links(body: &str) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = body
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.strip_prefix("L ")?.splitn(2, ' ');
+            Some((it.next()?.to_string(), it.next().unwrap_or("").to_string()))
         })
         .collect();
     v.sort();
@@ -191,9 +205,9 @@ mod tests {
         assert_eq!(procs.len(), 2);
         assert_eq!(procs[0].pid, 1);
         assert!(procs[0].stat.starts_with("1 (sleep) S 0"));
-        assert_eq!((procs[0].uid, procs[0].fds), (0, Some(3)));
+        assert_eq!((procs[0].uid, procs[0].fds), (Some(0), Some(3)));
         // fd/ of the second process was unreadable.
-        assert_eq!((procs[1].pid, procs[1].uid, procs[1].fds), (7, 1000, None));
+        assert_eq!((procs[1].pid, procs[1].uid, procs[1].fds), (7, Some(1000), None));
     }
 
     #[test]

@@ -6,6 +6,8 @@
 
 pub mod cpu;
 pub mod fixture;
+#[cfg(feature = "kube")]
+pub mod kube;
 pub mod linux_parse;
 
 #[cfg(target_os = "macos")]
@@ -17,7 +19,7 @@ mod macos;
 
 use std::collections::HashMap;
 
-use crate::model::{ProcId, ProcessDetails, Snapshot, Target};
+use crate::model::{Link, ProcId, ProcessDetails, Snapshot, Target};
 
 pub trait Collector {
     /// Human name of the platform, shown in the header.
@@ -31,6 +33,15 @@ pub trait Collector {
     /// The Kubernetes pod or node being read; `None` for this machine.
     fn target(&self) -> Option<&Target> {
         None
+    }
+    /// Health of the connection to the target.
+    fn link(&self) -> Option<Link> {
+        None
+    }
+    /// Send a signal (`kill -s <name>`) inside a remote target. Local
+    /// collectors leave this to the app, which calls kill(2) directly.
+    fn signal(&mut self, _id: ProcId, _signal: &str) -> anyhow::Result<()> {
+        anyhow::bail!("not supported here")
     }
 }
 

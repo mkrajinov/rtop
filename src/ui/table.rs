@@ -43,6 +43,7 @@ fn command_spans(cmdline: &str, name: &str, show_path: bool) -> Vec<Span<'static
 fn width(c: Column) -> Constraint {
     match c {
         Column::Pid => Constraint::Length(7),
+        Column::Container => Constraint::Length(12),
         Column::User => Constraint::Length(12),
         Column::State => Constraint::Length(2),
         Column::Pri | Column::Nice => Constraint::Length(4),
@@ -69,7 +70,7 @@ fn mini_bar(frac: f32) -> String {
 }
 
 fn is_numeric(c: Column) -> bool {
-    !matches!(c, Column::User | Column::State | Column::Command)
+    !matches!(c, Column::Container | Column::User | Column::State | Column::Command)
 }
 
 fn min_width(c: Column) -> u16 {
@@ -81,10 +82,9 @@ fn min_width(c: Column) -> u16 {
 
 /// Drop the least essential columns until the rest fit, so narrow terminals
 /// (or an open explain panel) never truncate PIDs.
-fn visible_columns(avail: u16) -> Vec<Column> {
+fn visible_columns(mut cols: Vec<Column>, avail: u16) -> Vec<Column> {
     const DROP_ORDER: [Column; 6] =
         [Column::Pri, Column::Vsz, Column::Time, Column::Fds, Column::Threads, Column::User];
-    let mut cols = Column::ALL.to_vec();
     for drop in DROP_ORDER {
         if cols.iter().map(|&c| min_width(c)).sum::<u16>() <= avail {
             break;
@@ -95,7 +95,7 @@ fn visible_columns(avail: u16) -> Vec<Column> {
 }
 
 pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
-    let cols = visible_columns(area.width.saturating_sub(2));
+    let cols = visible_columns(app.columns(), area.width.saturating_sub(2));
     let header = Row::new(cols.iter().map(|&c| {
         let arrow = if c == app.sort { if app.sort_desc { "▼" } else { "▲" } } else { "" };
         let mut style = Style::default().fg(theme::pal().dim);
@@ -157,6 +157,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
         };
         let cells = vec![
             num(p.pid.to_string()).style(theme::dim()),
+            Cell::from(crate::app::container(p).to_string()).style(Style::default().fg(theme::pal().code)),
             Cell::from(p.user.clone()).style(user_style),
             Cell::from(p.state.letter().to_string()).style(theme::state(p.state)),
             unknown(p.priority.to_string()),
@@ -203,6 +204,9 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
     };
     if app.tree {
         title.push_str(" · tree");
+    }
+    if let Some(c) = &app.container {
+        title.push_str(&format!(" · container {c} (C for the next)"));
     }
     if let Scope::Family(pid) = app.scope {
         title.push_str(&format!(" · family of {pid} (Esc to clear)"));

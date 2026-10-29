@@ -31,9 +31,9 @@ late responses after a timeout are discarded.
 
 | Request | Response frames |
 |---|---|
-| `hello` (sent by the script itself on start) | `version` (`1`), `uname` (`uname -r` or empty), `passwd` (`/etc/passwd`), `pagesize` |
+| `hello` (sent by the script itself on start, seq 0) | `version` (`1`), `pid` (the reader's own PID, labelled in the table), `uname` (`uname -r` or empty), `passwd` (`/etc/passwd`), `pagesize` (`getconf PAGESIZE`, often missing), `statm` and `status` of the reader (rtop derives the page size from them when `getconf` is missing) |
 | `snap <seq> [cgroup-root]` | `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/uptime`, `/proc/net/dev`, `/proc/diskstats`, then one `p <pid>` frame per process, then cgroup files under `cgroup-root` if given |
-| `cmd <seq> <pid>…` | one `/proc/<pid>/cmdline` frame per pid |
+| `cmd <seq> <pid>…` | `/proc/<pid>/cmdline` and `/proc/<pid>/cgroup` frames per pid (the cgroup tells containers apart in a shared PID namespace) |
 | `cg <seq> <pid>…` | one `/proc/<pid>/cgroup` frame per pid (node mode attribution) |
 | `details <seq> <pid>` | `status`, `cmdline`, `environ`, `io`, `limits`, `cgroup`, `schedstat`, `smaps_rollup`, `maps`, `wchan`, `oom_score`, `oom_score_adj`, links `exe`, `cwd`, `ns/*`, `fd/*` (as `L <fd> <target>` lines), `task/*/stat`, `net/tcp`, `tcp6`, `udp`, `udp6`, `unix` |
 | `kill <seq> <SIG> <pid>` | `rc` frame with the exit status and stderr of `kill` |

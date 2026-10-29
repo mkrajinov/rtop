@@ -39,6 +39,18 @@ pub struct Origin {
     pub container: std::sync::Arc<str>,
 }
 
+/// How a remote target is doing, for the header line.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Link {
+    /// The context came from the kubeconfig rather than from `--context`,
+    /// so the header highlights it: it may not be the cluster you think.
+    pub implicit_context: bool,
+    /// Age of the oldest sample on screen, once it is older than two refreshes.
+    pub stale: Option<std::time::Duration>,
+    /// What rtop added to the cluster or could not read.
+    pub notes: Vec<String>,
+}
+
 /// What rtop is attached to; `None` everywhere in local mode.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -242,6 +254,11 @@ pub struct GpuInfo {
 pub struct Snapshot {
     pub system: SystemInfo,
     pub processes: Vec<Process>,
+    /// When the target took this sample, for collectors whose samples
+    /// arrive late or twice (Kubernetes). CPU% divides by the time between
+    /// two samples, so it must use this clock, not the time of arrival.
+    /// `None`: the sample was taken just now.
+    pub clock: Option<std::time::Instant>,
 }
 
 /// A value plus its provenance.

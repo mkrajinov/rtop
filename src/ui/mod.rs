@@ -13,7 +13,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap};
 
-use crate::app::{App, Column, Mode, SIGNALS};
+use crate::app::{App, Mode, SIGNALS};
+use crate::model::Target;
 
 /// Catalog keys the UI refers to outside of `Field`s (checked by a test).
 pub const EXPLAIN_KEYS: &[&str] = &["maps", "fds", "threads", "environ", "raw", "limits", "namespaces", "pid"];
@@ -34,6 +35,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
+    if app.collector.target().is_some() {
+        header::draw_target(f, app, Rect { height: 1, ..chunks[0] });
+    }
     if header_height > 1 {
         header::draw(f, app, Rect { y: chunks[0].y + 1, height: chunks[0].height - 1, ..chunks[0] });
     }
@@ -58,7 +62,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     match app.mode {
         Mode::Signal => draw_signals(f, app, full),
-        Mode::Help => draw_help(f, full),
+        Mode::Help => draw_help(f, app, full),
         Mode::Theme => draw_theme(f, app, full),
         _ => {}
     }
@@ -95,6 +99,22 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("Esc", "back"),
                 ("T", "theme"),
                 ("?", "help"),
+            ]
+        } else if app.collector.target().is_some() {
+            &[
+                ("↑↓", "select"),
+                ("←→", "column"),
+                ("s", "sort"),
+                ("e", "explain"),
+                ("Enter", "inspect"),
+                ("/", "filter"),
+                ("C", "container"),
+                ("t", "tree"),
+                ("f", "family"),
+                ("k", "signal"),
+                ("T", "theme"),
+                ("?", "help"),
+                ("q", "quit"),
             ]
         } else {
             &[
@@ -157,13 +177,23 @@ fn draw_signals(f: &mut Frame, app: &App, area: Rect) {
         .collect();
     let mut state = ListState::default().with_selected(Some(app.signal_sel));
     let list = List::new(items)
-        .block(panel(format!("send signal to {} ({}) — kill(2)", p.pid, p.name)))
+        .block(panel(match app.collector.target() {
+            // FR-011: name where the signal goes, not just the PID.
+            Some(Target::Pod { namespace, pod, .. }) => format!(
+                "send signal to {} ({}) in {namespace}/{pod} container {} — kill -s in the container",
+                p.pid,
+                p.name,
+                crate::app::container(p)
+            ),
+            Some(Target::Node { node, .. }) => format!("send signal to {} ({}) on node {node}", p.pid, p.name),
+            None => format!("send signal to {} ({}) — kill(2)", p.pid, p.name),
+        }))
         .highlight_style(theme::selected())
         .highlight_symbol("› ");
     f.render_stateful_widget(list, r, &mut state);
 }
 
-fn draw_help(f: &mut Frame, area: Rect) {
+fn draw_help(f: &mut Frame, app: &App, area: Rect) {
     let r = centered(area, 78, 34);
     f.render_widget(Clear, r);
     let h = |k: &str, d: &str| {
@@ -202,7 +232,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         h("v", "reveal the answer"),
         Line::raw(""),
         Line::from(Span::styled(
-            format!("  Columns: {}", Column::ALL.iter().map(|c| c.title()).collect::<Vec<_>>().join(" ")),
+            format!("  Columns: {}", app.columns().iter().map(|c| c.title()).collect::<Vec<_>>().join(" ")),
             theme::dim(),
         )),
         Line::from(Span::styled("  Press any key to close.", theme::dim())),

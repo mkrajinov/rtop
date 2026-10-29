@@ -242,7 +242,7 @@ impl Collector for LinuxCollector {
             }
         }
         self.cmdlines.retain(|k, _| live.contains(k));
-        Snapshot { system, processes }
+        Snapshot { system, processes, clock: None }
     }
 
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
