@@ -23,7 +23,7 @@ exactly one `Reply` with that id follows.
 | `WatchPod { ns, name }` | `()` | then `Event::Pod(PodInfo)` on every change, and `Event::PodDeleted` |
 | `WatchNodePods { node }` | `()` | then `Event::NodeIndex(NodeIndex)`, debounced 1 s |
 | `Probe { ns, pod, container }` | `Probe { tools: bool, detail }` | `sh -c 'command -v cat'` |
-| `EnsureDebugContainer { ns, pod, target, image, sleep_secs }` | `Debug { name, created: bool }` | reuse or append; waits until running |
+| `EnsureDebugContainer { ns, pod, target, image, sleep_secs }` | `Debug { name, created: bool, ptrace: bool }` | reuse a running one that started after the target, or append; waits until running; `ptrace: false` when policy refused `SYS_PTRACE` and it was added without |
 | `ExecOpen { ns, pod, container, command, stdin_init: Vec<u8> }` | `Stream(StreamId)` | `stdin_init` is the reader script |
 | `StreamWrite { stream, data: Vec<u8> }` | `()` | |
 | `StreamClose { stream }` | `()` | |

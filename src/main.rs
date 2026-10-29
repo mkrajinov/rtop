@@ -22,7 +22,7 @@ struct Cli {
     /// Accent colour (overrides the config file).
     #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(ui::theme::ACCENTS.iter().map(|a| a.name)))]
     accent: Option<String>,
-    /// Kubernetes: show the processes of every container of this pod.
+    /// Show the processes of every container of this pod.
     #[arg(long, value_name = "[NAMESPACE/]POD", help_heading = "Kubernetes")]
     pod: Option<String>,
     /// Start narrowed to one container of the pod (C switches inside rtop).

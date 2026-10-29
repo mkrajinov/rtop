@@ -61,6 +61,10 @@ impl State {
                 });
                 continue;
             }
+            if let Request::ExecOpen { ns, pod, container, command, stdin_init } = req {
+                self.exec_open(id, &ns, &pod, &container, command, stdin_init);
+                continue;
+            }
             let stop = req == Request::Shutdown;
             let reply = self.handle(req).await;
             if self.out.send(Incoming::Reply(id, reply)).is_err() || stop {
@@ -74,9 +78,6 @@ impl State {
             Request::Hello { context } => self.hello(context).await,
             Request::GetPod { ns, name } => self.get_pod(&ns, &name).await,
             Request::WatchPod { ns, name } => self.watch_pod(ns, name),
-            Request::ExecOpen { ns, pod, container, command, stdin_init } => {
-                self.exec_open(&ns, &pod, &container, command, stdin_init).await
-            }
             Request::StreamWrite { stream, data } => self.stream_input(stream, Some(data)),
             Request::StreamClose { stream } => {
                 let r = self.stream_input(stream, None);
@@ -142,29 +143,47 @@ impl State {
 
     /// Start `command` in a container with stdin and without a TTY (a TTY
     /// would turn `\n` into `\r\n` and mix stderr into stdout).
-    async fn exec_open(
-        &mut self,
-        ns: &str,
-        pod: &str,
-        container: &str,
-        command: Vec<String>,
-        stdin_init: Vec<u8>,
-    ) -> Result<Reply, KubeError> {
-        let ap = AttachParams::default().container(container).stdin(true).stdout(true).stderr(true).tty(false);
-        let mut proc = self.pods(ns)?.exec(pod, command, &ap).await.map_err(map_err)?;
-        let (Some(mut stdin), Some(stdout), Some(stderr), Some(status)) =
-            (proc.stdin(), proc.stdout(), proc.stderr(), proc.take_status())
-        else {
-            return Err(KubeError::new(ErrorCode::Internal, "exec session without stdio"));
-        };
-        stdin.write_all(&stdin_init).await.map_err(|e| KubeError::new(ErrorCode::Unreachable, e.to_string()))?;
-
+    ///
+    /// The stream id and its input queue exist at once; connecting happens
+    /// in a task that also sends the reply. Against an unreachable API
+    /// server the connect can hang for a long time, and it must hold up
+    /// neither the other sessions nor `Shutdown`. Writes sent meanwhile wait
+    /// in the queue.
+    fn exec_open(&mut self, req: u64, ns: &str, pod: &str, container: &str, command: Vec<String>, stdin_init: Vec<u8>) {
         let id = self.next_stream;
         self.next_stream += 1;
         let (tx, rx) = unbounded_channel();
         self.streams.insert(id, tx);
         let out = self.out.clone();
+        let api = self.pods(ns);
+        let (pod, ap) = (
+            pod.to_string(),
+            AttachParams::default().container(container).stdin(true).stdout(true).stderr(true).tty(false),
+        );
         tokio::spawn(async move {
+            let started = async {
+                let mut proc = api?.exec(&pod, command, &ap).await.map_err(map_err)?;
+                let (Some(mut stdin), Some(stdout), Some(stderr), Some(status)) =
+                    (proc.stdin(), proc.stdout(), proc.stderr(), proc.take_status())
+                else {
+                    return Err(KubeError::new(ErrorCode::Internal, "exec session without stdio"));
+                };
+                stdin
+                    .write_all(&stdin_init)
+                    .await
+                    .map_err(|e| KubeError::new(ErrorCode::Unreachable, e.to_string()))?;
+                Ok((proc, stdin, stdout, stderr, status))
+            };
+            let (proc, stdin, stdout, stderr, status) = match started.await {
+                Ok(parts) => parts,
+                Err(e) => {
+                    let _ = out.send(Incoming::Reply(req, Reply::Err(e)));
+                    return;
+                }
+            };
+            if out.send(Incoming::Reply(req, Reply::Stream(id))).is_err() {
+                return;
+            }
             let (ended, stderr) = pump(id, stdin, stdout, stderr, rx, &out).await;
             let (exit_code, error) = match ended {
                 // stdout ended: the command exited, the status says how.
@@ -181,7 +200,6 @@ impl State {
             proc.abort();
             let _ = out.send(Incoming::Event(Event::StreamClosed { stream: id, exit_code, error }));
         });
-        Ok(Reply::Stream(id))
     }
 
     fn stream_input(&self, stream: StreamId, data: Option<Vec<u8>>) -> Result<Reply, KubeError> {

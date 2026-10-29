@@ -45,6 +45,8 @@ mod handle {
         rx: mpsc::Receiver<Incoming>,
         next_id: u64,
         thread: Option<JoinHandle<()>>,
+        /// Closed when the kube thread returns.
+        done: mpsc::Receiver<()>,
     }
 
     impl KubeHandle {
@@ -62,11 +64,15 @@ mod handle {
         fn spawn(preset: Option<Preset>) -> Self {
             let (tx, mut req_rx) = unbounded_channel();
             let (out, rx) = mpsc::channel();
+            let (done_tx, done) = mpsc::channel::<()>();
             let thread = std::thread::Builder::new()
                 .name("rtop-kube".into())
-                .spawn(move || run(&mut req_rx, out, preset))
+                .spawn(move || {
+                    let _done = done_tx;
+                    run(&mut req_rx, out, preset)
+                })
                 .expect("spawn kube thread");
-            KubeHandle { tx, rx, next_id: 1, thread: Some(thread) }
+            KubeHandle { tx, rx, next_id: 1, thread: Some(thread), done }
         }
 
         /// Queue a request; its reply arrives later with the returned id.
@@ -91,9 +97,14 @@ mod handle {
     }
 
     impl Drop for KubeHandle {
-        /// Delete what rtop added to the cluster and stop the runtime.
+        /// Delete what rtop added to the cluster and stop the runtime. A
+        /// cluster that stopped answering must not keep rtop from quitting:
+        /// after two seconds the thread is left to die with the process.
         fn drop(&mut self) {
             let _ = self.tx.send((0, Request::Shutdown));
+            if let Err(mpsc::RecvTimeoutError::Timeout) = self.done.recv_timeout(Duration::from_secs(2)) {
+                return;
+            }
             if let Some(t) = self.thread.take() {
                 let _ = t.join();
             }

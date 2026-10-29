@@ -413,22 +413,27 @@ impl Collector for KubeCollector {
         let mut d = lp::details(&files, &env, &mut |uid| users.get(&uid).cloned().unwrap_or(uid.to_string()))?;
         // In a shared namespace the process may be in another container
         // than the one the reader runs in.
-        let reader = s.container.to_string();
+        // Where the reader runs: the container itself, or its debug
+        // container. In a shared namespace (or next to a debug container)
+        // the process itself may be in another container.
+        let target = s.container.to_string();
+        let exec_in = s.exec_in.as_deref().unwrap_or(&target).to_string();
         let container = files
             .cgroup
             .as_deref()
             .and_then(|cg| crate::kube::attribution::container_id(cg))
             .and_then(|cid| self.pod.containers.iter().find(|c| c.id.as_deref() == Some(cid)))
-            .map_or(reader.clone(), |c| c.name.clone());
-        label(&mut d, &format!("[{pod}/{reader}]"));
+            .map_or(target.clone(), |c| c.name.clone());
+        let via = if exec_in == target { String::new() } else { format!(" via debug container {exec_in}") };
+        label(&mut d, &format!("[{pod}/{target}{via}]"));
         d.notes.push(format!(
-            "read over pods/exec in container {reader}. By hand: kubectl --context {context} -n {namespace} exec {pod} -c {reader} -- cat /proc/{}/status",
+            "read over pods/exec in container {exec_in}. By hand: kubectl --context {context} -n {namespace} exec {pod} -c {exec_in} -- cat /proc/{}/status",
             id.pid
         ));
-        if container != reader {
+        if container != target {
             d.notes.push(format!("this process belongs to container {container} (from its cgroup)"));
         }
-        d.notes.push(format!("'rtop' in the Kernel tab means the reader shell in container {reader}"));
+        d.notes.push(format!("'rtop' in the Kernel tab means the reader shell in container {exec_in}"));
         Ok(d)
     }
 

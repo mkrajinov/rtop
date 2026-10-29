@@ -21,14 +21,30 @@ pub fn prefix(target: &str) -> String {
     format!("rtop-{}-", &target[..target.len().min(50)])
 }
 
-/// A running debug container of rtop's for `target`, if there is one.
+/// A running debug container of rtop's for `target`, if there is one that
+/// joined the target's current PID namespace. When the target container
+/// restarts, its PID 1 dies and the kernel kills the debug container too;
+/// until the kubelet notices, one started before the restart still looks
+/// running, so it must have started after the target did.
 fn running(pod: &Pod, target: &str) -> Option<String> {
     let prefix = prefix(target);
     let spec = pod.spec.as_ref()?.ephemeral_containers.as_ref()?;
-    let status = pod.status.as_ref()?.ephemeral_container_statuses.as_ref()?;
+    let status = pod.status.as_ref()?;
+    let target_start = status
+        .container_statuses
+        .as_ref()?
+        .iter()
+        .find(|s| s.name == target)
+        .and_then(|s| s.state.as_ref()?.running.as_ref()?.started_at.clone());
+    let eph = status.ephemeral_container_statuses.as_ref()?;
     spec.iter()
         .filter(|e| e.name.starts_with(&prefix) && e.target_container_name.as_deref() == Some(target))
-        .find(|e| status.iter().any(|s| s.name == e.name && s.state.as_ref().is_some_and(|st| st.running.is_some())))
+        .find(|e| {
+            eph.iter().any(|s| {
+                let started = s.state.as_ref().and_then(|st| st.running.as_ref()).map(|r| r.started_at.clone());
+                s.name == e.name && started.is_some_and(|at| at >= target_start)
+            })
+        })
         .map(|e| e.name.clone())
 }
 
@@ -115,7 +131,7 @@ mod tests {
         (
             serde_json::json!([{"name": name, "image": "busybox:1.37", "targetContainerName": "app"}]),
             serde_json::json!([{"name": name, "image": "busybox:1.37", "imageID": "", "ready": false,
-                                "restartCount": 0, "state": {"running": {}}}]),
+                                "restartCount": 0, "state": {"running": {"startedAt": "2030-01-01T00:00:00Z"}}}]),
         )
     }
 
@@ -137,6 +153,16 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(answer(&mut api, 200, pod(spec, status)));
         assert_eq!(reply(&k, id), Reply::Debug { name: "rtop-app-abcde".into(), created: false, ptrace: true });
+    }
+
+    /// Started before the target's current instance: it was in the old PID
+    /// namespace and is about to be reported terminated.
+    #[test]
+    fn ignores_one_from_before_a_restart() {
+        let (spec, mut status) = running("rtop-app-old00");
+        status[0]["state"]["running"]["startedAt"] = "2000-01-01T00:00:00Z".into();
+        let p: k8s_openapi::api::core::v1::Pod = serde_json::from_value(pod(spec, status)).unwrap();
+        assert_eq!(super::running(&p, "app"), None);
     }
 
     #[test]
