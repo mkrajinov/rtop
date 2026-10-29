@@ -7,6 +7,10 @@ teach, not only by how useful they are as a monitor. Every new number still need
 - its provenance (the file or syscall it came from);
 - a fixture test if it is parsed on Linux.
 
+Each feature goes through Spec Kit (see `.specify/memory/constitution.md`):
+`/speckit-specify <feature>`, then `/speckit-plan`, `/speckit-tasks` and `/speckit-implement`.
+Specs are written to `specs/`.
+
 Size: **S** is an evening, **M** a few days, **L** a week or more.
 
 ## Done
@@ -77,7 +81,8 @@ These events can't be seen by polling `/proc`. They need `aya` and a privileged 
 
 ## Phase 6: polish and infrastructure
 
-- [ ] `git init` and a first commit (the project has no version control yet)
+- [x] `git init`, first commit, pushed to `github.com/mkrajinov/rtop`
+- [x] Spec Kit set up with the project constitution
 - [ ] CI: `make test lint` on macOS and Linux (GitHub Actions or GitLab CI)
 - [ ] Install clippy in the Docker image so `make lint` also runs on Linux
 - [ ] Mouse support: click to select, scroll, and click a column header to sort
