@@ -17,7 +17,8 @@ exactly one `Reply` with that id follows.
 |---|---|---|
 | `Hello { context: Option<String> }` | `Hello { context, namespace, server_version }` | builds the client; first request |
 | `GetPod { ns, name }` | `PodInfo` | |
-| `ListPods { ns }` | `Vec<PodSummary>` | picker |
+| `ListNamespaces` | `Namespaces(Vec<String>)`, sorted | picker; `Forbidden` for namespace-scoped users, the picker then falls back to the context's namespace |
+| `ListPods { ns }` | `Vec<PodSummary>`, sorted by namespace and name | picker; `ns` empty lists all namespaces |
 | `ListNodes` | `Vec<NodeSummary>` | picker |
 | `GetNode { name }` | `NodeInfo` (allocatable, pod count, Ready) | |
 | `WatchPod { ns, name }` | `()` | then `Event::Pod(PodInfo)` on every change, and `Event::PodDeleted` |
@@ -66,7 +67,8 @@ values map to FR-012 messages:
 - `ContainerInfo { name, id, ready, restarts, state, last_termination, requests: Resources,
   limits: Resources }`
 - `NodeIndex { pods: HashMap<Uid, (ns, name)>, containers: HashMap<ContainerId, (Uid, name)> }`
-- `PodSummary { ns, name, phase, reason, node, containers, ready }`
+- `PodSummary { ns, name, phase, reason, node, containers, ready, restarts, created }`
+  (`phase` is `Terminating` when the pod has a deletion timestamp, as in `kubectl get pods`)
 - `NodeSummary { name, ready, roles, pods }`
 
 The kube thread converts `k8s_openapi` types into these shapes with pure functions

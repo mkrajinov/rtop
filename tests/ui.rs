@@ -168,3 +168,40 @@ fn pod_mode_shows_containers_and_target() {
     press(&mut app, KeyCode::Char('k'));
     assert_eq!(app.mode, rtop::app::Mode::Table);
 }
+
+#[cfg(feature = "kube")]
+#[test]
+fn k8s_picker_lists_namespaces_and_pods() {
+    use rtop::kube::msg::PodSummary;
+    use rtop::picker::Picker;
+    let mut p = Picker::new("kind-rtop", true, "v1.32.2", "rtop-demo");
+    p.set_namespaces(vec!["default".into(), "kube-system".into(), "rtop-demo".into()]);
+    let pod = |name: &str, phase: &str, reason: Option<&str>, ready, containers, restarts| PodSummary {
+        ns: "rtop-demo".into(),
+        name: name.into(),
+        phase: phase.into(),
+        reason: reason.map(Into::into),
+        node: Some("rtop-control-plane".into()),
+        containers,
+        ready,
+        restarts,
+        created: Some(1_000_000 - 3 * 3600),
+    };
+    p.set_pods(Ok(vec![
+        pod("distroless", "Running", None, 1, 1, 2),
+        pod("limited", "Running", None, 1, 1, 0),
+        pod("multi", "Running", None, 2, 2, 0),
+        pod("broken", "Pending", Some("ImagePullBackOff"), 0, 1, 0),
+    ]));
+    p.now = 1_000_000;
+    let mut term = Terminal::new(TestBackend::new(110, 12)).unwrap();
+    term.draw(|f| ui::picker::draw(f, &p)).unwrap();
+    let buf = term.backend().buffer();
+    let screen = (0..12)
+        .map(|y| (0..110).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("kind-rtop (current context)"), "{screen}");
+    assert!(screen.contains("ImagePullBackOff"), "{screen}");
+    insta::assert_snapshot!(screen);
+}

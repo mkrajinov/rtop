@@ -1,0 +1,16 @@
+---
+source: tests/ui.rs
+expression: screen
+---
+ ⎈ kind-rtop (current context) · v1.32.2
+ ╭ Namespaces ────────╮╭ Pods in rtop-demo (4) ─────────────────────────────────────────────────────────────╮
+ │ all namespaces     ││ NAME        READY  STATUS             RESTARTS  AGE   NODE                         │
+ │ default            ││ distroless  1/1    Running            2         3h    rtop-control-plane           │
+ │ kube-system        ││ limited     1/1    Running            0         3h    rtop-control-plane           │
+ │ rtop-demo          ││ multi       2/2    Running            0         3h    rtop-control-plane           │
+ │                    ││ broken      0/1    ImagePullBackOff   0         3h    rtop-control-plane           │
+ │                    ││                                                                                    │
+ │                    ││                                                                                    │
+ │                    ││                                                                                    │
+ ╰────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯
+  ↑↓  select    Tab  pane    /  filter    Enter  open    r  refresh    q  quit

@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{Namespace, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
 use kube::Client;
-use kube::api::{Api, AttachParams};
+use kube::api::{Api, AttachParams, ListParams};
 use kube::config::{Config, KubeConfigOptions, Kubeconfig};
 use kube::runtime::{WatchStreamExt, watcher};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -77,6 +77,8 @@ impl State {
         let result = match req {
             Request::Hello { context } => self.hello(context).await,
             Request::GetPod { ns, name } => self.get_pod(&ns, &name).await,
+            Request::ListNamespaces => self.list_namespaces().await,
+            Request::ListPods { ns } => self.list_pods(&ns).await,
             Request::WatchPod { ns, name } => self.watch_pod(ns, name),
             Request::StreamWrite { stream, data } => self.stream_input(stream, Some(data)),
             Request::StreamClose { stream } => {
@@ -116,6 +118,22 @@ impl State {
     async fn get_pod(&self, ns: &str, name: &str) -> Result<Reply, KubeError> {
         let pod = self.pods(ns)?.get(name).await.map_err(map_err)?;
         Ok(Reply::Pod(convert::pod_info(&pod)))
+    }
+
+    async fn list_namespaces(&self) -> Result<Reply, KubeError> {
+        let api: Api<Namespace> = Api::all(self.client()?.clone());
+        let list = api.list(&ListParams::default()).await.map_err(map_err)?;
+        let mut names: Vec<String> = list.items.into_iter().filter_map(|n| n.metadata.name).collect();
+        names.sort();
+        Ok(Reply::Namespaces(names))
+    }
+
+    async fn list_pods(&self, ns: &str) -> Result<Reply, KubeError> {
+        let api: Api<Pod> = if ns.is_empty() { Api::all(self.client()?.clone()) } else { self.pods(ns)? };
+        let list = api.list(&ListParams::default()).await.map_err(map_err)?;
+        let mut pods: Vec<_> = list.items.iter().map(convert::pod_summary).collect();
+        pods.sort_by(|a, b| (&a.ns, &a.name).cmp(&(&b.ns, &b.name)));
+        Ok(Reply::Pods(pods))
     }
 
     /// Follow one pod: restarts, new ephemeral containers, deletion. The
@@ -454,6 +472,43 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn lists_namespaces_and_pods() {
+        let (mut k, mut api) = mocked();
+        let ns = k.send(Request::ListNamespaces);
+        let path = rt().block_on(answer(
+            &mut api,
+            200,
+            serde_json::json!({"kind": "NamespaceList", "apiVersion": "v1", "metadata": {},
+                               "items": [{"metadata": {"name": "rtop-demo"}}, {"metadata": {"name": "default"}}]}),
+        ));
+        assert_eq!(path, "/api/v1/namespaces");
+        assert_eq!(reply(&k, ns), Reply::Namespaces(vec!["default".into(), "rtop-demo".into()]));
+
+        let pods = k.send(Request::ListPods { ns: "rtop-demo".into() });
+        let list = serde_json::json!({"kind": "PodList", "apiVersion": "v1", "metadata": {}, "items": [pod_json()]});
+        let path = rt().block_on(answer(&mut api, 200, list.clone()));
+        assert_eq!(path, "/api/v1/namespaces/rtop-demo/pods");
+        let Reply::Pods(p) = reply(&k, pods) else { panic!() };
+        assert_eq!((p.len(), p[0].name.as_str(), p[0].ready), (1, "multi", 2));
+
+        let all = k.send(Request::ListPods { ns: String::new() });
+        assert_eq!(rt().block_on(answer(&mut api, 200, list)), "/api/v1/pods");
+        assert!(matches!(reply(&k, all), Reply::Pods(_)));
+    }
+
+    /// Namespace-scoped users cannot list namespaces; the picker falls back
+    /// to the context's namespace, so this must arrive as Forbidden.
+    #[test]
+    fn listing_namespaces_can_be_forbidden() {
+        let (mut k, mut api) = mocked();
+        let id = k.send(Request::ListNamespaces);
+        let msg = "namespaces is forbidden: User \"dev\" cannot list resource \"namespaces\" in API group \"\" at the cluster scope";
+        rt().block_on(answer(&mut api, 403, status(403, "Forbidden", msg)));
+        let Reply::Err(e) = reply(&k, id) else { panic!() };
+        assert_eq!(e.code, ErrorCode::Forbidden);
     }
 
     fn pod_json() -> serde_json::Value {

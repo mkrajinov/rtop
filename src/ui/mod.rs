@@ -4,6 +4,8 @@ mod detail;
 mod explain;
 mod header;
 mod lab;
+#[cfg(feature = "kube")]
+pub mod picker;
 mod table;
 pub mod theme;
 
@@ -107,6 +109,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("s", "sort"),
                 ("e", "explain"),
                 ("Enter", "inspect"),
+                ("Esc", "pods"),
                 ("/", "filter"),
                 ("C", "container"),
                 ("t", "tree"),
@@ -219,7 +222,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         h("k", "send a signal"),
         h("+  -", "renice (lowering nice needs privileges)"),
         h("p", "pause refreshing"),
-        h("Esc", "clear filter / scope; leave detail view"),
+        h("Esc", "clear filter / scope; leave detail view; back to the pod list (rtop k8s)"),
         h("q  Ctrl-C", "quit"),
         Line::raw(""),
         s("Detail view"),

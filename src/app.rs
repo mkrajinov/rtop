@@ -315,6 +315,10 @@ pub struct App {
     pub allow_actions: bool,
     pub tick: Duration,
     pub quit: bool,
+    /// `rtop k8s`: Esc with nothing left to clear returns to the picker,
+    /// which `back` tells the caller.
+    pub can_go_back: bool,
+    pub back: bool,
 }
 
 impl App {
@@ -358,6 +362,8 @@ impl App {
             allow_actions: false,
             tick: Duration::from_millis(1500),
             quit: false,
+            can_go_back: false,
+            back: false,
         }
     }
 
@@ -680,6 +686,8 @@ impl App {
                     self.filter.clear();
                     self.scope = Scope::All;
                     self.rebuild();
+                } else if self.can_go_back {
+                    self.back = true;
                 }
             }
             KeyCode::Up => self.select(self.selected.saturating_sub(1)),

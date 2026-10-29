@@ -27,7 +27,7 @@ fallback).
 
 ### User Story 1 - Inspect all processes of a pod (Priority: P1)
 
-An engineer starts rtop with a pod as the target (for example `rtop --pod my-ns/api-7c9f`, using
+An engineer starts rtop with a pod as the target (for example `rtop k8s --pod my-ns/api-7c9f`, using
 their current kubeconfig context). rtop connects through the Kubernetes API, without SSH to the
 node, and shows the processes of **every container in the pod** in one table with a CONTAINER
 column. Sorting, filtering, tree view, detail tabs, explain panel and raw viewer work as in a

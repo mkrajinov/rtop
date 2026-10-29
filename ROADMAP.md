@@ -26,9 +26,10 @@ Size: **S** is an evening, **M** a few days, **L** a week or more.
 
 ## Next: Kubernetes targets (spec: `specs/001-k8s-targets`)
 
-- [x] `rtop --pod ns/name`: processes of all containers in a pod, with a CONTAINER column; exec first, ephemeral debug container for distroless images
-- [ ] `rtop --node name`: every process on a node, labelled with its pod and container or `host`, through a short-lived helper pod
-- [ ] Target picker, and a container-aware dashboard (limits, throttling, OOM kills)
+- [x] `rtop k8s`: pick a namespace and pod in the current (or `--context`) context; Esc goes back to the list
+- [x] `rtop k8s --pod ns/name`: processes of all containers in a pod, with a CONTAINER column; exec first, ephemeral debug container for distroless images
+- [ ] `rtop k8s --node name`: every process on a node, labelled with its pod and container or `host`, through a short-lived helper pod
+- [ ] Nodes in the picker, and a container-aware dashboard (limits, throttling, OOM kills)
 
 ## Phase 1: finish the dashboard (small, visible wins)
 

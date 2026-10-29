@@ -164,15 +164,18 @@ labelled, self-expiring helper pod.
 
 ## Phase 5: User Story 3 - Choose a target interactively (Priority: P3)
 
-**Goal**: `rtop --kube` opens a filterable pod/node picker.
+**Goal**: `rtop k8s` opens a filterable namespace/pod (later also node) picker.
 
-**Independent Test**: quickstart: start `rtop --context kind-rtop --kube -n rtop-demo`, pick
-`multi`, quit, pick the node.
+**Independent Test**: quickstart: start `rtop k8s --context kind-rtop -n rtop-demo`, pick
+`multi`, Esc back to the picker, pick another pod.
 
-- [ ] T045 [P] [US3] Snapshot test in tests/ui.rs: picker with a pods tab and a nodes tab from fixtures, filter applied
-- [ ] T046 [US3] Implement the picker in src/ui/picker.rs and src/app.rs: pods (status, node, container count), nodes (Ready, roles, pod count), `/` filter, Enter attaches, Tab switches lists
-- [ ] T047 [US3] For a non-Running pod or NotReady node, explain why it can't attach instead of attaching, in src/ui/picker.rs
-- [ ] T048 [US3] `--kube` flag in src/main.rs; switch from the picker to KubeCollector without restarting the terminal
+- [X] T045 [P] [US3] Snapshot test in tests/ui.rs: picker with a pods tab and a nodes tab from fixtures, filter applied
+  - Done differently: `k8s_picker_lists_namespaces_and_pods` snapshots the namespace and pod panes; the filter is covered by unit tests in src/picker.rs. The nodes tab comes with US2.
+- [X] T046 [US3] Implement the picker in src/ui/picker.rs and src/app.rs: pods (status, node, container count), nodes (Ready, roles, pod count), `/` filter, Enter attaches, Tab switches lists
+  - Done differently (user request): two panes, namespaces (with "all namespaces") and their pods (READY, STATUS, RESTARTS, AGE, NODE). State and keys live in src/picker.rs rather than in App. New kube requests `ListNamespaces` and `ListPods` (empty ns = all). Forbidden namespace listing falls back to the context's namespace; `/` then Enter opens a typed one. Pods are listed again every 3 s. Nodes wait for US2.
+- [X] T047 [US3] For a non-Running pod or NotReady node, explain why it can't attach instead of attaching, in src/ui/picker.rs
+- [X] T048 [US3] `--kube` flag in src/main.rs; switch from the picker to KubeCollector without restarting the terminal
+  - Done differently (user request): `rtop k8s` subcommand instead of `--kube`; `--pod`, `--context`, `-n`, `-c`, `--debug-image`, `--no-debug-container` and `--allow-actions` moved under it. The pod view opens on a thread while the picker keeps drawing (Esc cancels); its errors appear in the picker's status line. Esc in the pod view returns to the picker with that pod selected. Each pod view has its own kube thread, so leaving it stops its watchers and readers.
 
 **Checkpoint**: Stories 1–3 work.
 

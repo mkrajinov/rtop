@@ -8,4 +8,6 @@ pub mod fmt;
 pub mod kube;
 pub mod labs;
 pub mod model;
+#[cfg(feature = "kube")]
+pub mod picker;
 pub mod ui;

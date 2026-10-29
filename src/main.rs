@@ -13,40 +13,21 @@ use rtop::{collector, labs, ui};
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
-    /// Refresh interval in seconds [default: 1.5, or 2 in Kubernetes mode].
-    #[arg(short, long)]
+    /// Refresh interval in seconds [default: 1.5, or 2 for rtop k8s].
+    #[arg(short, long, global = true)]
     delay: Option<f32>,
     /// Colour theme (overrides the config file).
-    #[arg(long, alias = "gray", value_parser = clap::builder::PossibleValuesParser::new(ui::theme::THEMES.iter().map(|t| t.name)))]
+    #[arg(long, global = true, alias = "gray", value_parser = clap::builder::PossibleValuesParser::new(ui::theme::THEMES.iter().map(|t| t.name)))]
     theme: Option<String>,
     /// Accent colour (overrides the config file).
-    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(ui::theme::ACCENTS.iter().map(|a| a.name)))]
+    #[arg(long, global = true, value_parser = clap::builder::PossibleValuesParser::new(ui::theme::ACCENTS.iter().map(|a| a.name)))]
     accent: Option<String>,
-    /// Show the processes of every container of this pod.
-    #[arg(long, value_name = "[NAMESPACE/]POD", help_heading = "Kubernetes")]
-    pod: Option<String>,
-    /// Start narrowed to one container of the pod (C switches inside rtop).
-    #[arg(short = 'c', long, requires = "pod", help_heading = "Kubernetes")]
-    container: Option<String>,
-    /// Namespace of the pod [default: the context's namespace].
-    #[arg(short = 'n', long, requires = "pod", help_heading = "Kubernetes")]
-    namespace: Option<String>,
-    /// kubeconfig context to use [default: the current context].
-    #[arg(long, requires = "pod", help_heading = "Kubernetes")]
-    context: Option<String>,
-    /// Image for the debug container added to images without a shell.
-    #[arg(long, value_name = "IMAGE", default_value = "busybox:1.37", requires = "pod", help_heading = "Kubernetes")]
-    debug_image: String,
-    /// Never add a debug container; containers without a shell are reported instead.
-    #[arg(long, requires = "pod", help_heading = "Kubernetes")]
-    no_debug_container: bool,
-    /// Allow sending signals to processes in the pod (read-only otherwise).
-    #[arg(long, requires = "pod", help_heading = "Kubernetes")]
-    allow_actions: bool,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Processes of a Kubernetes pod: pick a namespace and pod, or name one with --pod.
+    K8s(K8sArgs),
     /// Start a guided lab: rtop spawns a misbehaving process tree and asks questions.
     Lab {
         /// Lab name; omit to list them.
@@ -59,14 +40,43 @@ enum Cmd {
     LabWorker { name: String },
 }
 
+#[derive(clap::Args)]
+struct K8sArgs {
+    /// kubeconfig context to use [default: the current context].
+    #[arg(long)]
+    context: Option<String>,
+    /// Open this pod directly instead of the picker.
+    #[arg(long, value_name = "[NAMESPACE/]POD")]
+    pod: Option<String>,
+    /// Namespace of --pod, or the one the picker starts in [default: the context's namespace].
+    #[arg(short = 'n', long)]
+    namespace: Option<String>,
+    /// Start narrowed to one container of the pod (C switches inside rtop).
+    #[arg(short = 'c', long, requires = "pod")]
+    container: Option<String>,
+    /// Image for the debug container added to images without a shell.
+    #[arg(long, value_name = "IMAGE", default_value = "busybox:1.37")]
+    debug_image: String,
+    /// Never add a debug container; containers without a shell are reported instead.
+    #[arg(long)]
+    no_debug_container: bool,
+    /// Allow sending signals to processes in the pod (read-only otherwise).
+    #[arg(long)]
+    allow_actions: bool,
+}
+
 fn main() -> anyhow::Result<()> {
     let mut cli = Cli::parse();
-    let kube_mode = cli.pod.is_some();
-    if kube_mode && cli.command.is_some() {
-        bail!("labs and inspect are not available in Kubernetes mode");
-    }
+    let cfg = rtop::config::load();
+    ui::theme::set_by_name(cfg.theme.as_deref(), cfg.accent.as_deref());
+    ui::theme::set_by_name(cli.theme.as_deref(), cli.accent.as_deref());
+    let kube_mode = matches!(cli.command, Some(Cmd::K8s(_)));
+    let delay = cli.delay.unwrap_or(if kube_mode { 2.0 } else { 1.5 }).max(0.2);
+    let tick = Duration::from_secs_f32(delay);
+
     let mut lab = None;
     match cli.command.take() {
+        Some(Cmd::K8s(args)) => return k8s(args, tick),
         Some(Cmd::LabWorker { name }) => return labs::worker::run(&name),
         Some(Cmd::Inspect { pid }) => return inspect(pid),
         Some(Cmd::Lab { name: None }) => {
@@ -88,20 +98,8 @@ fn main() -> anyhow::Result<()> {
         None => {}
     }
 
-    let cfg = rtop::config::load();
-    ui::theme::set_by_name(cfg.theme.as_deref(), cfg.accent.as_deref());
-    ui::theme::set_by_name(cli.theme.as_deref(), cli.accent.as_deref());
-
-    let delay = cli.delay.unwrap_or(if kube_mode { 2.0 } else { 1.5 }).max(0.2);
-    let tick = Duration::from_secs_f32(delay);
-    let collector = match &cli.pod {
-        Some(pod) => kube_collector(&cli, pod, tick)?,
-        None => collector::native(),
-    };
-    let mut app = App::new(collector);
+    let mut app = App::new(collector::native());
     app.tick = tick;
-    app.container = cli.container.clone();
-    app.allow_actions = cli.allow_actions;
     if let Some(l) = lab {
         app = app.with_lab(l);
     }
@@ -137,7 +135,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
     app.refresh();
     let mut last = Instant::now();
     let mut dirty = true;
-    while !app.quit && !QUIT.load(Ordering::Relaxed) {
+    while !app.quit && !app.back && !QUIT.load(Ordering::Relaxed) {
         if dirty {
             terminal.draw(|f| ui::draw(f, app))?;
             dirty = false;
@@ -166,29 +164,161 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
     Ok(())
 }
 
-/// Connect to the pod before the TUI starts, so errors print as plain
-/// one-line messages (contracts/cli.md).
+/// `rtop k8s`: the picker, and the pod view opened from it. Esc in the pod
+/// view comes back to the picker.
+///
+/// The client is built, and a pod named with `--pod` is opened, before the
+/// TUI starts, so those errors print as plain one-line messages
+/// (contracts/cli.md). Pods chosen in the picker are opened on a thread
+/// while the picker keeps drawing, and their errors show in its status line.
 #[cfg(feature = "kube")]
-fn kube_collector(cli: &Cli, pod: &str, tick: Duration) -> anyhow::Result<Box<dyn collector::Collector>> {
-    use collector::kube::{KubeCollector, PodOptions};
-    let (namespace, pod) = match pod.split_once('/') {
-        Some((ns, name)) => (Some(ns.to_string()), name.to_string()),
-        None => (cli.namespace.clone(), pod.to_string()),
+fn k8s(args: K8sArgs, tick: Duration) -> anyhow::Result<()> {
+    use collector::kube::KubeCollector;
+    use rtop::picker::Picker;
+
+    eprintln!("connecting to {} …", args.context.as_deref().unwrap_or("the current context"));
+    let (pod_ns, pod) = match args.pod.as_deref().map(|p| p.split_once('/')) {
+        Some(Some((ns, name))) => (Some(ns.to_string()), Some(name.to_string())),
+        Some(None) => (args.namespace.clone(), args.pod.clone()),
+        None => (args.namespace.clone(), None),
     };
-    eprintln!("connecting to {} …", cli.context.as_deref().unwrap_or("the current context"));
-    let opts = PodOptions {
-        context: cli.context.clone(),
-        namespace,
+    let mut picker = Picker::connect(args.context.clone(), pod_ns.clone())?;
+    let first = match pod {
+        Some(pod) => Some(KubeCollector::connect(pod_options(&args, &picker, picker.ns.clone(), pod, tick))?),
+        None => None,
+    };
+
+    install_quit_signals()?;
+    let mut terminal = ratatui::init();
+    let result = k8s_loop(&mut terminal, &mut picker, first, &args, tick);
+    ratatui::restore();
+    Ok(result?)
+}
+
+/// Both pod views use the context the picker resolved, so a kubeconfig
+/// changed meanwhile cannot send rtop to another cluster.
+#[cfg(feature = "kube")]
+fn pod_options(
+    args: &K8sArgs,
+    picker: &rtop::picker::Picker,
+    namespace: String,
+    pod: String,
+    tick: Duration,
+) -> collector::kube::PodOptions {
+    collector::kube::PodOptions {
+        context: Some(picker.context.clone()),
+        implicit_context: picker.implicit_context,
+        namespace: Some(namespace),
         pod,
         tick,
-        debug_image: cli.debug_image.clone(),
-        debug: !cli.no_debug_container,
-    };
-    Ok(Box::new(KubeCollector::connect(opts)?))
+        debug_image: args.debug_image.clone(),
+        debug: !args.no_debug_container,
+    }
+}
+
+#[cfg(feature = "kube")]
+fn k8s_loop(
+    terminal: &mut ratatui::DefaultTerminal,
+    picker: &mut rtop::picker::Picker,
+    mut next: Option<collector::kube::KubeCollector>,
+    args: &K8sArgs,
+    tick: Duration,
+) -> io::Result<()> {
+    let mut container = args.container.clone();
+    loop {
+        let collector = match next.take() {
+            Some(c) => c,
+            None => match pick(terminal, picker, args, tick)? {
+                Some(c) => c,
+                None => return Ok(()),
+            },
+        };
+        let mut app = App::new(Box::new(collector));
+        app.tick = tick;
+        app.container = container.take();
+        app.allow_actions = args.allow_actions;
+        app.can_go_back = true;
+        run(terminal, &mut app)?;
+        if !app.back {
+            return Ok(());
+        }
+        if let Some(rtop::model::Target::Pod { namespace, pod, .. }) = app.collector.target() {
+            picker.came_back(namespace, pod);
+        }
+    }
+}
+
+/// Run the picker until a pod view is open (`None`: quit).
+#[cfg(feature = "kube")]
+fn pick(
+    terminal: &mut ratatui::DefaultTerminal,
+    picker: &mut rtop::picker::Picker,
+    args: &K8sArgs,
+    tick: Duration,
+) -> io::Result<Option<collector::kube::KubeCollector>> {
+    use std::sync::mpsc;
+
+    use collector::kube::KubeCollector;
+    use crossterm::event::KeyCode;
+    use rtop::picker::Action;
+
+    let mut opening: Option<mpsc::Receiver<anyhow::Result<KubeCollector>>> = None;
+    while !QUIT.load(Ordering::Relaxed) {
+        picker.tick();
+        if let Some(rx) = &opening {
+            match rx.try_recv() {
+                Ok(Ok(c)) => {
+                    picker.connecting = None;
+                    return Ok(Some(c));
+                }
+                Ok(Err(e)) => {
+                    picker.connecting = None;
+                    picker.set_status(e.to_string());
+                    opening = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    picker.connecting = None;
+                    picker.set_status("opening the pod failed");
+                    opening = None;
+                }
+            }
+        }
+        terminal.draw(|f| ui::picker::draw(f, picker))?;
+        if !event::poll(Duration::from_millis(100))? {
+            continue;
+        }
+        let Event::Key(key) = event::read()? else { continue };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if opening.is_some() && key.code == KeyCode::Esc {
+            // The thread finishes on its own; what it opened is dropped,
+            // which closes its readers.
+            opening = None;
+            picker.connecting = None;
+            picker.set_status("cancelled");
+            continue;
+        }
+        match picker.handle_key(key) {
+            Action::Quit => return Ok(None),
+            Action::Open { ns, pod } => {
+                picker.connecting = Some(format!("{ns}/{pod}"));
+                let opts = pod_options(args, picker, ns, pod, tick);
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(KubeCollector::connect(opts));
+                });
+                opening = Some(rx);
+            }
+            Action::None => {}
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(not(feature = "kube"))]
-fn kube_collector(_: &Cli, _: &str, _: Duration) -> anyhow::Result<Box<dyn collector::Collector>> {
+fn k8s(_: K8sArgs, _: Duration) -> anyhow::Result<()> {
     bail!("this rtop was built without Kubernetes support: rebuild with default features (cargo build --release)")
 }
 
@@ -221,4 +351,28 @@ fn inspect(pid: i32) -> anyhow::Result<()> {
     }
     println!("\n== Memory map: {} regions", d.regions.len());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Cmd};
+
+    fn parse(args: &str) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(args.split_whitespace())
+    }
+
+    #[test]
+    fn kubernetes_flags_live_under_k8s() {
+        assert!(parse("rtop --pod multi").is_err());
+        assert!(parse("rtop --context kind-rtop").is_err());
+        let Ok(cli) = parse("rtop k8s --context kind-rtop -n rtop-demo -d 1") else { panic!() };
+        let Some(Cmd::K8s(k)) = cli.command else { panic!() };
+        assert_eq!((k.context.as_deref(), k.namespace.as_deref(), k.pod), (Some("kind-rtop"), Some("rtop-demo"), None));
+        assert_eq!(cli.delay, Some(1.0));
+        assert!(parse("rtop k8s --pod rtop-demo/multi -c app --allow-actions").is_ok());
+        // A container only makes sense for a named pod.
+        assert!(parse("rtop k8s -c app").is_err());
+    }
 }

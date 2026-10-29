@@ -6,7 +6,7 @@
 
 ## Summary
 
-`rtop --pod ns/name` and `rtop --node name` run the normal TUI on the laptop. They read Linux
+`rtop k8s --pod ns/name` and `rtop k8s --node name` run the normal TUI on the laptop. They read Linux
 `/proc` data from the target through the Kubernetes API only:
 
 - **Client**: a `src/kube/` module on **kube-rs**, in the same binary behind a default-on `kube`
@@ -116,7 +116,7 @@ specs/001-k8s-targets/
 ```text
 Cargo.toml               # [features] default = ["kube"]; optional kube deps
 src/
-├── main.rs              # + --pod/--node/--kube flags (cfg feature "kube"), mode selection
+├── main.rs              # + `k8s` subcommand (--pod/--node, picker), cfg feature "kube"
 ├── model.rs             # + ProcId, Process.space, Process.origin, Target
 ├── app.rs               # Pid → ProcId keys; container filter; Pending details; stale banner
 ├── collector/

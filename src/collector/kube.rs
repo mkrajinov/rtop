@@ -25,6 +25,8 @@ use crate::model::*;
 pub struct PodOptions {
     /// `None`: the kubeconfig's current context.
     pub context: Option<String>,
+    /// The context was not named on the command line: the header warns.
+    pub implicit_context: bool,
     /// `None`: the context's namespace.
     pub namespace: Option<String>,
     pub pod: String,
@@ -63,7 +65,7 @@ impl KubeCollector {
     /// container. Errors are the one-line messages of contracts/cli.md.
     pub fn connect(opts: PodOptions) -> anyhow::Result<Self> {
         let mut k = KubeHandle::start();
-        let implicit_context = opts.context.is_none();
+        let implicit_context = opts.implicit_context || opts.context.is_none();
         let id = k.send(Request::Hello { context: opts.context });
         let Reply::Hello { context, namespace, .. } = wait(&k, id)? else { bail!("unexpected reply to hello") };
         let ns = opts.namespace.unwrap_or(namespace);

@@ -27,10 +27,21 @@ kubectl --context kind-rtop wait --for=condition=Ready pod --all -n rtop-demo --
 
 The namespace is labelled `pod-security.kubernetes.io/enforce=privileged` for the node helper.
 
+## 1a. Picker (Story 3)
+
+```sh
+rtop k8s --context kind-rtop -n rtop-demo
+```
+
+Expect namespaces on the left with `rtop-demo` selected, its four pods on the right with
+READY, STATUS, RESTARTS, AGE and NODE. Tab switches panes, `/` filters the focused pane,
+Enter on `multi` opens the pod view, Esc there returns to the picker with `multi` selected.
+"all namespaces" adds a NAMESPACE column.
+
 ## 2. Pod, all containers (Story 1, SC-001, SC-002)
 
 ```sh
-time rtop --context kind-rtop --pod rtop-demo/multi
+time rtop k8s --context kind-rtop --pod rtop-demo/multi
 ```
 
 Expect:
@@ -46,7 +57,7 @@ for c in app sidecar; do kubectl --context kind-rtop -n rtop-demo exec multi -c 
 ## 3. Distroless fallback (FR-003)
 
 ```sh
-rtop --context kind-rtop --pod rtop-demo/distroless
+rtop k8s --context kind-rtop --pod rtop-demo/distroless
 kubectl --context kind-rtop -n rtop-demo get pod distroless -o jsonpath='{.spec.ephemeralContainers[*].name}'
 ```
 
@@ -58,13 +69,13 @@ With `--no-debug-container`, the `app` container shows one line saying why it ca
 
 ## 4. Shared PID namespace
 
-`rtop --context kind-rtop --pod rtop-demo/shared` shows each process once, labelled `app`,
+`rtop k8s --context kind-rtop --pod rtop-demo/shared` shows each process once, labelled `app`,
 `sidecar` or `pause`.
 
 ## 5. Node (Story 2, SC-004)
 
 ```sh
-rtop --context kind-rtop --node rtop-control-plane --helper-namespace rtop-demo
+rtop k8s --context kind-rtop --node rtop-control-plane --helper-namespace rtop-demo
 ```
 
 Expect:
@@ -81,7 +92,7 @@ test quickly, run once with an env override `RTOP_HELPER_DEADLINE=60`.
 
 ## 6. Container dashboard (Story 4, SC-006)
 
-`rtop --context kind-rtop --pod rtop-demo/limited` shows:
+`rtop k8s --context kind-rtop --pod rtop-demo/limited` shows:
 - memory as `used / 256Mi`;
 - CPU against `500m`, with throttled periods increasing;
 - an explain entry for memory that says `/proc/meminfo` shows the node's memory.

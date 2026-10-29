@@ -3,7 +3,7 @@
 
 use k8s_openapi::api::core::v1::{ContainerState, Pod};
 
-use super::msg::{ContainerInfo, EphemeralInfo, PodInfo, Resources};
+use super::msg::{ContainerInfo, EphemeralInfo, PodInfo, PodSummary, Resources};
 
 pub fn pod_info(pod: &Pod) -> PodInfo {
     let meta = &pod.metadata;
@@ -73,6 +73,24 @@ pub fn pod_info(pod: &Pod) -> PodInfo {
     }
 }
 
+/// One picker row. A pod being deleted reports phase `Terminating`, as
+/// `kubectl get pods` does, although the API keeps its old phase.
+pub fn pod_summary(pod: &Pod) -> PodSummary {
+    let info = pod_info(pod);
+    let terminating = pod.metadata.deletion_timestamp.is_some();
+    PodSummary {
+        phase: if terminating { "Terminating".into() } else { info.phase },
+        reason: info.reason,
+        node: info.node,
+        containers: info.containers.len(),
+        ready: info.containers.iter().filter(|c| c.ready).count(),
+        restarts: info.containers.iter().map(|c| c.restarts).sum(),
+        created: pod.metadata.creation_timestamp.as_ref().map(|t| t.0.as_second()),
+        ns: info.ns,
+        name: info.name,
+    }
+}
+
 /// `containerd://abc…` → `abc…`: the ID as it appears in cgroup paths.
 fn strip_runtime(id: &str) -> String {
     id.split_once("://").map_or(id, |(_, rest)| rest).to_string()
@@ -112,6 +130,14 @@ mod tests {
         let id = app.id.as_deref().unwrap();
         assert!(!id.contains("://") && id.len() == 64, "{id}");
         assert_eq!(p.reason, None);
+    }
+
+    #[test]
+    fn picker_row() {
+        let s = pod_summary(&fixture("pod.json"));
+        assert_eq!((s.ns.as_str(), s.name.as_str(), s.phase.as_str()), ("rtop-demo", "multi", "Running"));
+        assert_eq!((s.containers, s.ready), (2, 2));
+        assert!(s.created.is_some_and(|t| t > 1_700_000_000));
     }
 
     #[test]

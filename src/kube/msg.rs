@@ -19,6 +19,8 @@ pub enum Request {
         ns: String,
         name: String,
     },
+    ListNamespaces,
+    /// `ns` empty: every namespace.
     ListPods {
         ns: String,
     },
@@ -84,6 +86,7 @@ pub enum Reply {
         server_version: String,
     },
     Pod(PodInfo),
+    Namespaces(Vec<String>),
     Pods(Vec<PodSummary>),
     Nodes(Vec<NodeSummary>),
     Node(NodeInfo),
@@ -229,6 +232,9 @@ pub struct PodSummary {
     pub node: Option<String>,
     pub containers: usize,
     pub ready: usize,
+    pub restarts: i32,
+    /// `metadata.creationTimestamp` in Unix seconds.
+    pub created: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
