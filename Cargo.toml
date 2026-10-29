@@ -9,19 +9,32 @@ license = "MIT"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
+futures = { version = "0.3", optional = true }
+k8s-openapi = { version = "0.28", optional = true, features = ["v1_32"] }
+kube = { version = "4.2", default-features = false, features = ["client", "runtime", "ws", "rustls-tls", "ring"], optional = true }
 libc = "0.2"
 nix = { version = "0.31", features = ["signal", "process", "resource", "user"] }
 procfs-core = "0.18"
 ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "io-util", "sync"], optional = true }
 toml = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"
 
 [dev-dependencies]
+http = "1"
 insta = "1"
+tower-test = "0.4"
 
 [profile.release]
 lto = "thin"
 strip = true
+
+[features]
+default = ["kube"]
+# Kubernetes targets (`--pod`, `--node`): kube-rs on a tokio thread. Without it rtop is
+# local-only and pulls in no async runtime.
+kube = ["dep:kube", "dep:k8s-openapi", "dep:tokio", "dep:futures", "dep:serde_json"]
