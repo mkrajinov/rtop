@@ -54,8 +54,19 @@ pub struct Link {
 /// What rtop is attached to; `None` everywhere in local mode.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Pod { context: String, namespace: String, pod: String, node: Option<String>, container: Option<String> },
-    Node { context: String, node: String },
+    Pod {
+        context: String,
+        namespace: String,
+        pod: String,
+        node: Option<String>,
+        container: Option<String>,
+    },
+    /// `detail`: allocatable capacity and pod count, for the header.
+    Node {
+        context: String,
+        node: String,
+        detail: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

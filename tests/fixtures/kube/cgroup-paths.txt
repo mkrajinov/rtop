@@ -1,0 +1,31 @@
+# /proc/<pid>/cgroup lines and what node mode makes of them (research R9).
+# Format: <kind> <pod id or -> <container id or -> <line>
+#   kind: container | pause | host | own (the helper's own processes)
+# The kind lines were read from a hostPID busybox pod on kind (containerd,
+# systemd driver, cgroup v2) on 2026-10-29. Paths are relative to that pod's
+# cgroup namespace, hence the /.. prefixes. Static pods (etcd, apiserver...)
+# carry a 32-hex config hash instead of a UID; the mirror pod's
+# kubernetes.io/config.mirror annotation holds the same hash.
+
+# kind: containerd, systemd driver
+container b134f042-30d9-43ea-a147-8b03d568b9b9 a934e5e93242eeb8595d1218c949b67a7ffd07ea54780a6ed7f90867ff598b8d 0::/../../../kubelet-kubepods-burstable.slice/kubelet-kubepods-burstable-podb134f042_30d9_43ea_a147_8b03d568b9b9.slice/cri-containerd-a934e5e93242eeb8595d1218c949b67a7ffd07ea54780a6ed7f90867ff598b8d.scope
+container c0d0f78b712ec418cdb01a4fd0426729 55f64133a5719893b6880215988e0e49e5c2d3387898f6dc30f2c32d7d67ecc3 0::/../../../kubelet-kubepods-burstable.slice/kubelet-kubepods-burstable-podc0d0f78b712ec418cdb01a4fd0426729.slice/cri-containerd-55f64133a5719893b6880215988e0e49e5c2d3387898f6dc30f2c32d7d67ecc3.scope
+container 9ab0cf4e-2e37-4742-8300-bfa400d56950 d9b0f46fce6c08a2dbf22a32dca258f4c123d17df0818c4d819a1541f1f4c91b 0::/../../kubelet-kubepods-besteffort-pod9ab0cf4e_2e37_4742_8300_bfa400d56950.slice/cri-containerd-d9b0f46fce6c08a2dbf22a32dca258f4c123d17df0818c4d819a1541f1f4c91b.scope
+pause 16796b5d-f12f-404c-bd16-26bf8ba24751 f701ecc523de0205609762050023083df459fb7d2911984deaec3b0912fcafb8 0::/../../../kubelet-kubepods-burstable.slice/kubelet-kubepods-burstable-pod16796b5d_f12f_404c_bd16_26bf8ba24751.slice/cri-containerd-f701ecc523de0205609762050023083df459fb7d2911984deaec3b0912fcafb8.scope
+host - - 0::/../../../../../system.slice/containerd.service
+host - - 0::/../../../../kubelet.service
+host - - 0::/../../../../../init.scope
+own - - 0::/
+
+# containerd, systemd driver, seen from the host's cgroup namespace
+container 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d 4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3 0::/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod1b2c3d4e_5f60_4a7b_8c9d_0e1f2a3b4c5d.slice/cri-containerd-4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3.scope
+# Guaranteed QoS has no QoS slice
+container 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d 4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3 0::/kubepods.slice/kubepods-pod1b2c3d4e_5f60_4a7b_8c9d_0e1f2a3b4c5d.slice/cri-containerd-4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3.scope
+# cri-o, systemd driver
+container 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d 4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3 0::/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod1b2c3d4e_5f60_4a7b_8c9d_0e1f2a3b4c5d.slice/crio-4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3.scope
+# docker (cri-dockerd), systemd driver
+container 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d 4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3 0::/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod1b2c3d4e_5f60_4a7b_8c9d_0e1f2a3b4c5d.slice/docker-4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3.scope
+# cgroupfs driver: plain UID and bare ID
+container 1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d 4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3 0::/kubepods/burstable/pod1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d/4f1c3a0e5b2d47f8a9c6e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d1f3
+host - - 0::/system.slice/kubelet.service
+host - - 0::/user.slice/user-1000.slice/session-3.scope

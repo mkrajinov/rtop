@@ -6,6 +6,9 @@
 # dash and busybox ash. Per process it uses builtins (read, printf) and never
 # forks, so a snapshot of a few hundred processes stays cheap.
 #
+# Node mode sets RTOP_ROOT=/proc/1/root and RTOP_NET=/proc/1/net first, so
+# user names and network counters come from the host, not the helper pod.
+#
 # Everything sits in one function that is called on the last line: the
 # shell parses the whole script before it prints the hello, so the first
 # request can never end up in the parser's buffer instead of `read`.
@@ -38,7 +41,7 @@ rtop_reader() {
 		_f uname
 		uname -r 2>/dev/null
 		_e $?
-		_file /etc/passwd passwd
+		_file "${RTOP_ROOT:-}/etc/passwd" passwd
 		_f pagesize
 		getconf PAGESIZE 2>/dev/null
 		_e $?
@@ -50,9 +53,11 @@ rtop_reader() {
 
 	_snap() {
 		seq=$1
-		for x in stat meminfo loadavg uptime net/dev diskstats; do
+		for x in stat meminfo loadavg uptime; do
 			_file /proc/$x
 		done
+		_file "${RTOP_NET:-/proc/net}/dev" /proc/net/dev
+		_file /proc/diskstats
 		for d in /proc/[0-9]*; do
 			# A process may exit between the glob and the reads; the shell
 			# reports the failed open on stderr before any inner 2>/dev/null

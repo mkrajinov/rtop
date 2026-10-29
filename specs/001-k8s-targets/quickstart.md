@@ -87,8 +87,14 @@ After quitting:
 ```sh
 kubectl --context kind-rtop -n rtop-demo get pods -l app.kubernetes.io/managed-by=rtop
 ```
-returns nothing. After `kill -9` of rtop, the helper is gone within its 3600 s deadline. To
-test quickly, run once with an env override `RTOP_HELPER_DEADLINE=60`.
+returns nothing, also after SIGTERM to rtop and after Esc back to the picker. After `kill -9`
+of rtop, the helper is gone within its 3600 s deadline. To test quickly, run once with an env
+override `RTOP_HELPER_DEADLINE=40`: when the helper ends, rtop deletes it and reads through a new
+one.
+
+Admission: in a namespace labelled `pod-security.kubernetes.io/enforce=baseline`, rtop exits
+with `helper pod rejected by admission in <ns>: … violates PodSecurity …` and the
+`--helper-namespace` hint.
 
 ## 6. Container dashboard (Story 4, SC-006)
 

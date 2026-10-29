@@ -18,9 +18,9 @@ namespace and `/` accepts a typed namespace name.
 |---|---|---|
 | `--pod [NS/]POD` | | Pod target. `NS/` overrides `-n`. |
 | `-c, --container NAME` | all containers | Start narrowed to one container (FR-005). Needs `--pod`. |
-| `--node NODE` | | Node target (Story 2). |
+| `--node NODE` | | Node target (Story 2). Always read-only: `--allow-actions` does not apply. |
 | `-n, --namespace NS` | kubeconfig namespace, else `default` | Namespace of `--pod`; the namespace the picker starts in. |
-| `--helper-namespace NS` | `-n` value | Where the node helper pod is created. |
+| `--helper-namespace NS` | `-n` value, else the context's namespace | Where the node helper pod is created; must allow `hostPID` (Pod Security `privileged`). |
 | `--context CTX` | kubeconfig current context | Resolved once when the client is built; no other context is used. Always shown in the header, highlighted when it was not given explicitly. |
 | `--debug-image IMAGE` | `busybox:1.37` | Image for the debug container and the helper pod. |
 | `--no-debug-container` | off | Never add an ephemeral container; unreadable containers are reported instead. |
@@ -47,4 +47,5 @@ Exit messages (FR-012), one line each plus the next step:
 | context unknown or unreachable | `context <ctx>: …` |
 | RBAC denied | `forbidden: <verb> <resource> in <ns>` (link to README permissions) |
 | pod not Running / node not Ready | `pod <ns/name> is <phase>: <reason>` / `node <name> is NotReady` |
-| helper pod rejected | `helper pod rejected by <admission>: …` (`--helper-namespace` hint) |
+| helper pod rejected | `helper pod rejected by admission in <ns>: …` (`--helper-namespace` hint) |
+| helper pod not deleted on exit | after the TUI closes: `rtop could not delete its helper pod; remove it with: kubectl … delete pod …` |

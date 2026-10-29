@@ -102,6 +102,21 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("T", "theme"),
                 ("?", "help"),
             ]
+        } else if let Some(Target::Node { .. }) = app.collector.target() {
+            &[
+                ("↑↓", "select"),
+                ("←→", "column"),
+                ("s", "sort"),
+                ("e", "explain"),
+                ("Enter", "inspect"),
+                ("Esc", "pods"),
+                ("/", "filter pod or command"),
+                ("t", "tree"),
+                ("f", "family"),
+                ("T", "theme"),
+                ("?", "help"),
+                ("q", "quit"),
+            ]
         } else if app.collector.target().is_some() {
             &[
                 ("↑↓", "select"),

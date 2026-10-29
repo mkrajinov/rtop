@@ -178,6 +178,11 @@ alternative is used.
   - At start, finished rtop helpers are deleted by label.
 - **Pod Security admission**: `hostPID` and `hostPath` need `privileged`. The admission
   message is shown with a `--helper-namespace` hint.
+- **As built (Phase 4)**: no hostPath mount, `capabilities.drop: [ALL]` plus `SYS_PTRACE`, and
+  node mode is read-only: root in a hostPID pod may signal any root process (same UID), so
+  dropping CAP_KILL would not stop it. Verified on kind: `kill -0 1` succeeds from the helper.
+  The reader reads the host's passwd via `/proc/1/root/etc/passwd` and network counters via
+  `/proc/1/net/dev`. A helper that ends is deleted and replaced.
 - **Alternative considered**: the same thing as `kubectl debug node/X`, which offers no control
   of deadline or labels.
 
@@ -190,7 +195,10 @@ alternative is used.
     bare 64-hex segment.
 
   It matches segments anywhere in the path, so the `/../..` prefix seen from inside the
-  helper's cgroup namespace doesn't matter (**verify on kind**).
+  helper's cgroup namespace doesn't matter (verified on kind). The helper's own processes read
+  `0::/`, its pause container `/../cri-containerd-<id>.scope` (no pod segment). Static pods put
+  a 32-hex config hash where the UID goes; the mirror pod's `kubernetes.io/config.mirror`
+  annotation has the same hash.
 - **Node index**: a `watcher` with field selector `spec.nodeName=<node>` maintains pod UID →
   namespace/name and container ID → (pod UID, container name). It sends a `NodeIndex` event
   when the index changes, debounced to 1 s.

@@ -40,6 +40,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 crate::app::Column::User => format!("{} (uid {})", p.user, p.uid),
                 crate::app::Column::Pid => p.pid.to_string(),
                 crate::app::Column::Container => crate::app::container(p).to_string(),
+                crate::app::Column::Pod => crate::app::pod(p).to_string(),
                 crate::app::Column::Command => p.cmdline.clone(),
             };
             (format!("PID {} ({}): {v}", p.pid, p.name), String::new())

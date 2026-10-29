@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::{Namespace, Pod};
+use k8s_openapi::api::core::v1::{Namespace, Node, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
 use kube::Client;
 use kube::api::{Api, AttachParams, ListParams};
@@ -61,6 +61,18 @@ impl State {
                 });
                 continue;
             }
+            if let Request::HelperCreate { node, ns, image, deadline_secs, session } = req {
+                let (api, out) = (self.pods(&ns), self.out.clone());
+                let pod = super::helper::manifest(&node, &image, deadline_secs, &session);
+                tokio::spawn(async move {
+                    let reply = match api {
+                        Ok(api) => super::helper::create(&api, pod).await,
+                        Err(e) => Err(e),
+                    };
+                    let _ = out.send(Incoming::Reply(id, reply.unwrap_or_else(Reply::Err)));
+                });
+                continue;
+            }
             if let Request::ExecOpen { ns, pod, container, command, stdin_init } = req {
                 self.exec_open(id, &ns, &pod, &container, command, stdin_init);
                 continue;
@@ -80,6 +92,16 @@ impl State {
             Request::ListNamespaces => self.list_namespaces().await,
             Request::ListPods { ns } => self.list_pods(&ns).await,
             Request::WatchPod { ns, name } => self.watch_pod(ns, name),
+            Request::GetNode { name } => self.get_node(&name).await,
+            Request::WatchNodePods { node } => self.watch_node_pods(node),
+            Request::HelperDelete { ns, name } => match self.pods(&ns) {
+                Ok(api) => super::helper::delete(&api, &name).await,
+                Err(e) => Err(e),
+            },
+            Request::HelperGc { ns } => match self.pods(&ns) {
+                Ok(api) => super::helper::gc(&api).await,
+                Err(e) => Err(e),
+            },
             Request::StreamWrite { stream, data } => self.stream_input(stream, Some(data)),
             Request::StreamClose { stream } => {
                 let r = self.stream_input(stream, None);
@@ -137,6 +159,52 @@ impl State {
         let mut pods: Vec<_> = list.items.iter().map(convert::pod_summary).collect();
         pods.sort_by(|a, b| (&a.ns, &a.name).cmp(&(&b.ns, &b.name)));
         Ok(Reply::Pods(pods))
+    }
+
+    async fn get_node(&self, name: &str) -> Result<Reply, KubeError> {
+        let api: Api<Node> = Api::all(self.client()?.clone());
+        let node = api.get(name).await.map_err(map_err)?;
+        Ok(Reply::Node(convert::node_info(&node)))
+    }
+
+    /// Keep an index of the pods on a node, for attributing its processes
+    /// by cgroup. Changes come in bursts (a rollout), so the index is sent
+    /// at most once a second.
+    fn watch_node_pods(&self, node: String) -> Result<Reply, KubeError> {
+        let api: Api<Pod> = Api::all(self.client()?.clone());
+        let out = self.out.clone();
+        let cfg = watcher::Config::default().fields(&format!("spec.nodeName={node}"));
+        tokio::spawn(async move {
+            let mut events = watcher(api, cfg).default_backoff().boxed();
+            let mut pods: HashMap<String, Pod> = HashMap::new();
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+            let mut dirty = false;
+            loop {
+                tokio::select! {
+                    ev = events.next() => match ev {
+                        Some(Ok(watcher::Event::Apply(p) | watcher::Event::InitApply(p))) => {
+                            pods.insert(p.metadata.uid.clone().unwrap_or_default(), p);
+                            dirty = true;
+                        }
+                        Some(Ok(watcher::Event::Delete(p))) => {
+                            pods.remove(p.metadata.uid.as_deref().unwrap_or_default());
+                            dirty = true;
+                        }
+                        Some(Ok(watcher::Event::Init)) => pods.clear(),
+                        Some(_) => {}
+                        None => return,
+                    },
+                    _ = tick.tick(), if dirty => {
+                        dirty = false;
+                        let ev = Event::NodeIndex(convert::node_index(pods.values()));
+                        if out.send(Incoming::Event(ev)).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        Ok(Reply::Done)
     }
 
     /// Follow one pod: restarts, new ephemeral containers, deletion. The

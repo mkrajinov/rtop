@@ -1,5 +1,7 @@
 //! A pod as the target (User Story 1): every container's processes, read by
-//! a `sh` reader in each container over `pods/exec`.
+//! a `sh` reader in each container over `pods/exec`. Or a node (User Story
+//! 2): one reader in a `hostPID` helper pod rtop creates on it, with each
+//! process attributed to its pod and container by cgroup.
 //!
 //! Containers normally have their own PID namespace, so there is one
 //! session per running container and its processes get `space` = the
@@ -10,7 +12,7 @@
 //! shows the latest answers that have arrived (research R6).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail};
@@ -18,7 +20,8 @@ use anyhow::{anyhow, bail};
 use super::linux_parse as lp;
 use super::{Collector, Pending};
 use crate::kube::KubeHandle;
-use crate::kube::msg::{Event, Incoming, PodInfo, Reply, Request};
+use crate::kube::attribution::Owners;
+use crate::kube::msg::{ErrorCode, Event, Incoming, KubeError, NodeIndex, NodeInfo, PodInfo, Reply, Request};
 use crate::kube::session::{self, Phase, Session};
 use crate::model::*;
 
@@ -38,6 +41,33 @@ pub struct PodOptions {
     pub debug: bool,
 }
 
+pub struct NodeOptions {
+    pub context: Option<String>,
+    pub implicit_context: bool,
+    pub node: String,
+    /// Where the helper pod goes; `None`: the context's namespace.
+    pub helper_namespace: Option<String>,
+    pub tick: Duration,
+    pub image: String,
+}
+
+/// Helper pods rtop could not delete on exit, as the commands that delete
+/// them. `main` prints these after the terminal is restored.
+pub static LEFTOVER: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Node mode: the node, and the helper pod (in `KubeCollector::pod`) whose
+/// reader sees all of its processes.
+struct NodeMode {
+    info: NodeInfo,
+    owners: Owners,
+    /// Pods on the node, from the index.
+    pods: usize,
+    image: String,
+    deadline: u32,
+    /// HelperCreate request id while a replacement helper is on its way.
+    replacing: Option<u64>,
+}
+
 pub struct KubeCollector {
     k: KubeHandle,
     target: Target,
@@ -55,6 +85,7 @@ pub struct KubeCollector {
     /// target's clock into `Snapshot::clock`.
     epoch: Option<(f64, Instant)>,
     notes: Vec<String>,
+    node: Option<NodeMode>,
 }
 
 /// How long start-up waits for the cluster before giving up.
@@ -93,11 +124,148 @@ impl KubeCollector {
             tick: opts.tick,
             epoch: None,
             notes: Vec::new(),
+            node: None,
             pod,
         };
         c.plan_sessions();
         c.first_samples();
         Ok(c)
+    }
+
+    /// Create the helper pod on the node and start a reader in it. Errors
+    /// are the one-line messages of contracts/cli.md.
+    pub fn connect_node(opts: NodeOptions) -> anyhow::Result<Self> {
+        let mut k = KubeHandle::start();
+        let implicit_context = opts.implicit_context || opts.context.is_none();
+        let id = k.send(Request::Hello { context: opts.context });
+        let Reply::Hello { context, namespace, .. } = wait(&k, id)? else { bail!("unexpected reply to hello") };
+        let id = k.send(Request::GetNode { name: opts.node.clone() });
+        let info = match wait(&k, id) {
+            Ok(Reply::Node(n)) => n,
+            Ok(other) => bail!("unexpected reply {other:?}"),
+            Err(e) => bail!("node {}: {e}", opts.node),
+        };
+        if !info.ready {
+            bail!("node {} is NotReady", info.name);
+        }
+        let ns = opts.helper_namespace.unwrap_or(namespace);
+        // Leftovers of earlier sessions; failing to list them is no reason
+        // not to start.
+        let id = k.send(Request::HelperGc { ns: ns.clone() });
+        let _ = wait(&k, id);
+        let deadline = helper_deadline();
+        let name = create_helper(&mut k, &info.name, &ns, &opts.image, deadline)?;
+        k.send(Request::WatchPod { ns: ns.clone(), name: name.clone() });
+        k.send(Request::WatchNodePods { node: info.name.clone() });
+        let pod = PodInfo { ns: ns.clone(), name, phase: "Running".into(), ..Default::default() };
+        let target = Target::Node { context, node: info.name.clone(), detail: String::new() };
+        let mut c = KubeCollector {
+            k,
+            target,
+            implicit_context,
+            sessions: Vec::new(),
+            opening: HashMap::new(),
+            debugging: HashMap::new(),
+            debug_image: opts.image.clone(),
+            debug: false,
+            tick: opts.tick,
+            epoch: None,
+            notes: Vec::new(),
+            node: Some(NodeMode {
+                info,
+                owners: Owners { unmatched: "host".into(), ..Default::default() },
+                pods: 0,
+                image: opts.image,
+                deadline,
+                replacing: None,
+            }),
+            pod,
+        };
+        c.helper_note();
+        c.plan_node_session();
+        c.first_samples();
+        Ok(c)
+    }
+
+    fn helper_note(&mut self) {
+        self.notes.retain(|t| !t.starts_with("via helper pod"));
+        let text = format!("via helper pod {}/{} (deleted on exit)", self.pod.ns, self.pod.name);
+        self.note(&text);
+    }
+
+    /// One reader in the helper, pointed at the host's passwd and network
+    /// namespace; its own processes are the helper's.
+    fn plan_node_session(&mut self) {
+        let Some(n) = &self.node else { return };
+        let mut s = Session::new(0, "reader");
+        s.prelude = "RTOP_ROOT=/proc/1/root\nRTOP_NET=/proc/1/net\n".into();
+        let helper = format!("{}/{}", self.pod.ns, self.pod.name);
+        s.own = Some(Origin { pod: Some(helper.into()), container: "reader".into() });
+        s.shared = Some(n.owners.clone());
+        self.sessions = vec![s];
+    }
+
+    fn node_index(&mut self, idx: NodeIndex) {
+        let Some(n) = &mut self.node else { return };
+        let pod = |uid: &str| idx.pods.get(uid).map(|(ns, name)| format!("{ns}/{name}"));
+        n.owners.containers = idx
+            .containers
+            .iter()
+            .filter_map(|(id, (uid, c))| {
+                Some((id.clone(), Origin { pod: Some(pod(uid)?.into()), container: c.as_str().into() }))
+            })
+            .collect();
+        n.owners.pods = idx.pods.keys().filter_map(|uid| Some((uid.clone(), pod(uid)?.into()))).collect();
+        n.pods = idx.pods.values().collect::<std::collections::HashSet<_>>().len();
+        for s in &mut self.sessions {
+            s.shared = Some(n.owners.clone());
+        }
+        if let Target::Node { detail, .. } = &mut self.target {
+            *detail = node_detail(&n.info, n.pods);
+        }
+    }
+
+    /// The helper ended (its deadline, or someone deleted it): put a new
+    /// one on the node and read from that.
+    fn helper_gone(&mut self, why: &str) {
+        let Some(n) = &mut self.node else { return };
+        if n.replacing.is_some() {
+            return;
+        }
+        let old = self.pod.name.clone();
+        // A finished helper stays as Completed until deleted.
+        self.k.send(Request::HelperDelete { ns: self.pod.ns.clone(), name: old.clone() });
+        let id = self.k.send(Request::HelperCreate {
+            node: n.info.name.clone(),
+            ns: self.pod.ns.clone(),
+            image: n.image.clone(),
+            deadline_secs: n.deadline,
+            session: session_id(),
+        });
+        n.replacing = Some(id);
+        self.close_all();
+        for s in &mut self.sessions {
+            s.stop(&format!("helper pod {old} {why}; starting a new one"));
+        }
+    }
+
+    fn helper_ready(&mut self, reply: Reply) {
+        let Some(n) = &mut self.node else { return };
+        n.replacing = None;
+        match reply {
+            Reply::Helper { name } => {
+                self.k.send(Request::WatchPod { ns: self.pod.ns.clone(), name: name.clone() });
+                self.pod.name = name;
+                self.helper_note();
+                self.plan_node_session();
+            }
+            Reply::Err(e) => {
+                for s in &mut self.sessions {
+                    s.stop(&format!("new helper pod: {e}"));
+                }
+            }
+            _ => {}
+        }
     }
 
     /// One session per running container, or one for the whole pod when
@@ -107,7 +275,7 @@ impl KubeCollector {
         if self.pod.share_process_namespace {
             if let Some(c) = self.pod.containers.iter().find(|c| c.state == "running") {
                 let mut s = Session::new(0, &c.name);
-                s.shared = Some(self.container_ids());
+                s.shared = Some(self.owners());
                 self.sessions.push(s);
             }
         } else {
@@ -121,8 +289,15 @@ impl KubeCollector {
         }
     }
 
-    fn container_ids(&self) -> HashMap<String, Arc<str>> {
-        self.pod.containers.iter().filter_map(|c| Some((c.id.clone()?, Arc::from(c.name.as_str())))).collect()
+    /// The pod's containers by ID, to tell them apart by cgroup.
+    fn owners(&self) -> Owners {
+        let containers = self
+            .pod
+            .containers
+            .iter()
+            .filter_map(|c| Some((c.id.clone()?, Origin { pod: None, container: c.name.as_str().into() })))
+            .collect();
+        Owners { containers, pods: HashMap::new(), unmatched: "?".into() }
     }
 
     /// Wait (a few seconds at most) until every session has sent its first
@@ -141,8 +316,7 @@ impl KubeCollector {
     }
 
     fn open(&mut self, i: usize) {
-        let Target::Pod { namespace, pod, .. } = &self.target else { return };
-        let id = self.sessions[i].open(&mut self.k, namespace, pod);
+        let id = self.sessions[i].open(&mut self.k, &self.pod.ns, &self.pod.name);
         self.opening.insert(id, i);
     }
 
@@ -186,7 +360,7 @@ impl KubeCollector {
                         "{name} runs without SYS_PTRACE (policy): other users' fds and environ are hidden"
                     ));
                 }
-                let ids = self.container_ids();
+                let ids = self.owners();
                 let s = &mut self.sessions[i];
                 s.exec_in = Some(name.into());
                 // The reader now sits next to the target: tell their
@@ -214,6 +388,8 @@ impl KubeCollector {
                     self.sessions[i].on_open(reply);
                 } else if let Some(i) = self.debugging.remove(&id) {
                     self.debug_ready(i, reply);
+                } else if self.node.as_ref().is_some_and(|n| n.replacing == Some(id)) {
+                    self.helper_ready(reply);
                 }
             }
             Incoming::Event(Event::StreamData { stream, data }) => {
@@ -224,6 +400,16 @@ impl KubeCollector {
             Incoming::Event(Event::StreamClosed { stream, exit_code, error }) => {
                 if let Some(s) = self.sessions.iter_mut().find(|s| s.stream == Some(stream)) {
                     s.on_closed(exit_code, error);
+                }
+            }
+            Incoming::Event(Event::Pod(p)) if self.node.is_some() => {
+                if p.name == self.pod.name && p.phase != "Running" {
+                    self.helper_gone(&format!("is {}", p.phase));
+                }
+            }
+            Incoming::Event(Event::PodDeleted { name, .. }) if self.node.is_some() => {
+                if name == self.pod.name {
+                    self.helper_gone("was deleted");
                 }
             }
             Incoming::Event(Event::Pod(p)) => self.pod_changed(p),
@@ -238,7 +424,7 @@ impl KubeCollector {
                     s.fail(&format!("kube thread restarted: {reason}"));
                 }
             }
-            Incoming::Event(Event::NodeIndex(_)) => {}
+            Incoming::Event(Event::NodeIndex(idx)) => self.node_index(idx),
         }
     }
 
@@ -259,7 +445,7 @@ impl KubeCollector {
             self.plan_sessions();
             return;
         }
-        let ids = self.container_ids();
+        let ids = self.owners();
         for i in 0..self.sessions.len() {
             let name = self.sessions[i].container.clone();
             let Some(now) = self.pod.containers.iter().find(|c| *c.name == *name) else { continue };
@@ -327,18 +513,110 @@ impl KubeCollector {
     }
 }
 
+/// Waiting for a helper includes pulling its image on the node.
+const CREATE_TIMEOUT: Duration = Duration::from_secs(75);
+
+/// `RTOP_HELPER_DEADLINE` (seconds) shortens the helper's life, to test
+/// what happens when it ends.
+fn helper_deadline() -> u32 {
+    std::env::var("RTOP_HELPER_DEADLINE").ok().and_then(|v| v.parse().ok()).unwrap_or(3600).max(30)
+}
+
+/// A random-enough label value that tells this rtop's helpers apart.
+fn session_id() -> String {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    format!("{:08x}", (n.as_nanos() as u64 ^ (std::process::id() as u64).wrapping_mul(0x9e37_79b9)) as u32)
+}
+
+fn create_helper(k: &mut KubeHandle, node: &str, ns: &str, image: &str, deadline: u32) -> anyhow::Result<String> {
+    let id = k.send(Request::HelperCreate {
+        node: node.into(),
+        ns: ns.into(),
+        image: image.into(),
+        deadline_secs: deadline,
+        session: session_id(),
+    });
+    match wait_for(k, id, CREATE_TIMEOUT) {
+        Ok(Reply::Helper { name }) => Ok(name),
+        Ok(other) => bail!("unexpected reply {other:?}"),
+        Err(e) if e.downcast_ref::<KubeError>().is_some_and(|e| e.code == ErrorCode::Admission) => {
+            bail!(
+                "helper pod rejected by admission in {ns}: {e} (pick a namespace that allows hostPID with --helper-namespace)"
+            )
+        }
+        Err(e) => bail!("helper pod in {ns}: {e}"),
+    }
+}
+
+/// `allocatable 8 cpu · 31.2G · 17 pods`
+fn node_detail(info: &NodeInfo, pods: usize) -> String {
+    let mut parts = Vec::new();
+    if let Some(cpu) = info.allocatable.get("cpu") {
+        parts.push(format!("{cpu} cpu"));
+    }
+    if let Some(mem) = info.allocatable.get("memory").and_then(|m| quantity_bytes(m)) {
+        parts.push(crate::fmt::bytes(mem));
+    }
+    let alloc = if parts.is_empty() { String::new() } else { format!("allocatable {} · ", parts.join(" ")) };
+    format!("{alloc}{pods} pods")
+}
+
+/// `16Gi`, `1024Ki`, `2G`, `123456` → bytes.
+fn quantity_bytes(q: &str) -> Option<u64> {
+    let split = q.find(|c: char| !c.is_ascii_digit()).unwrap_or(q.len());
+    let (n, unit) = q.split_at(split);
+    let n: u64 = n.parse().ok()?;
+    let mul: u64 = match unit {
+        "" => 1,
+        "Ki" => 1 << 10,
+        "Mi" => 1 << 20,
+        "Gi" => 1 << 30,
+        "Ti" => 1 << 40,
+        "k" => 1_000,
+        "M" => 1_000_000,
+        "G" => 1_000_000_000,
+        "T" => 1_000_000_000_000,
+        _ => return None,
+    };
+    Some(n * mul)
+}
+
+impl Drop for KubeCollector {
+    /// Delete the helper pod. If that fails, the command that deletes it
+    /// goes to `LEFTOVER` for `main` to print.
+    fn drop(&mut self) {
+        if self.node.is_none() {
+            return;
+        }
+        let (ns, name) = (self.pod.ns.clone(), self.pod.name.clone());
+        let id = self.k.send(Request::HelperDelete { ns: ns.clone(), name: name.clone() });
+        if !matches!(wait_for(&self.k, id, Duration::from_secs(3)), Ok(Reply::Deleted(_))) {
+            let context = match &self.target {
+                Target::Node { context, .. } | Target::Pod { context, .. } => context.clone(),
+            };
+            if let Ok(mut l) = LEFTOVER.lock() {
+                l.push(format!("kubectl --context {context} -n {ns} delete pod {name}"));
+            }
+        }
+    }
+}
+
 /// Wait for the reply to `id` during start-up (before the TUI runs).
 fn wait(k: &KubeHandle, id: u64) -> anyhow::Result<Reply> {
-    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    wait_for(k, id, CONNECT_TIMEOUT)
+}
+
+fn wait_for(k: &KubeHandle, id: u64, timeout: Duration) -> anyhow::Result<Reply> {
+    let deadline = Instant::now() + timeout;
     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
         match k.recv_timeout(left) {
-            Some(Incoming::Reply(got, Reply::Err(e))) if got == id => return Err(anyhow!("{e}")),
+            Some(Incoming::Reply(got, Reply::Err(e))) if got == id => return Err(e.into()),
             Some(Incoming::Reply(got, r)) if got == id => return Ok(r),
             Some(_) => {}
             None => break,
         }
     }
-    bail!("no answer from the API server in {} s", CONNECT_TIMEOUT.as_secs())
+    bail!("no answer from the API server in {} s", timeout.as_secs())
 }
 
 fn uptime(text: &str) -> Option<f64> {
@@ -367,8 +645,10 @@ impl Collector for KubeCollector {
         let text = |n: &str| r.text(n).unwrap_or_default();
         let mut system =
             lp::system(&text("/proc/stat"), &text("/proc/meminfo"), &text("/proc/loadavg"), &text("/proc/uptime"));
-        // The pod's network namespace also lists idle tunnel devices
-        // (ip_vti0, sit0, ...); only interfaces that moved bytes count.
+        // A network namespace also lists idle tunnel devices (ip_vti0,
+        // sit0, ...); only interfaces that moved bytes count. On a node the
+        // reader reads /proc/1/net/dev: the host's namespace, not the
+        // helper pod's.
         let net: Vec<_> = lp::parse_net_dev(&text("/proc/net/dev"))
             .into_iter()
             .filter(|(n, rx, tx)| n != "lo" && rx + tx > 0)
@@ -377,12 +657,16 @@ impl Collector for KubeCollector {
             read: net.iter().map(|n| n.1).sum(),
             write: net.iter().map(|n| n.2).sum(),
             source: format!(
-                "{} · /proc/net/dev of the pod",
-                net.iter().map(|n| n.0.as_str()).collect::<Vec<_>>().join(" ")
+                "{} · {}",
+                net.iter().map(|n| n.0.as_str()).collect::<Vec<_>>().join(" "),
+                if self.node.is_some() { "/proc/1/net/dev of the node" } else { "/proc/net/dev of the pod" }
             ),
         });
-        system.cpu =
-            CpuInfo { model: format!("node {}", self.pod.node.as_deref().unwrap_or("?")), ..Default::default() };
+        let node = match &self.node {
+            Some(n) => n.info.name.as_str(),
+            None => self.pod.node.as_deref().unwrap_or("?"),
+        };
+        system.cpu = CpuInfo { model: format!("node {node}"), ..Default::default() };
         let up = uptime(&text("/proc/uptime"));
         Snapshot { system, processes, clock: self.clock(up) }
     }
@@ -390,7 +674,6 @@ impl Collector for KubeCollector {
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
         self.drain();
         let now = Instant::now();
-        let Target::Pod { context, namespace, pod, .. } = &self.target else { bail!("not a pod target") };
         let s = self
             .sessions
             .iter_mut()
@@ -413,8 +696,23 @@ impl Collector for KubeCollector {
         let files = session::proc_files(id.pid, resp);
         let users = &s.users;
         let mut d = lp::details(&files, &env, &mut |uid| users.get(&uid).cloned().unwrap_or(uid.to_string()))?;
-        // In a shared namespace the process may be in another container
-        // than the one the reader runs in.
+        let (ns, helper) = (&self.pod.ns, &self.pod.name);
+        if let (Target::Node { context, node, .. }, Some(n)) = (&self.target, &self.node) {
+            label(&mut d, &format!("[node {node}]"));
+            let own = s.own.clone().unwrap_or(Origin { pod: None, container: "reader".into() });
+            let owner = n.owners.owner(files.cgroup.as_deref().unwrap_or_default(), &d.name, &own);
+            d.notes.push(match &owner.pod {
+                Some(pod) => format!("belongs to pod {pod}, container {} (from its cgroup)", owner.container),
+                None => format!("belongs to {} (its cgroup matches no pod on the node)", owner.container),
+            });
+            d.notes.push(format!(
+                "read over pods/exec in helper pod {ns}/{helper}, which shares the node's PID namespace (hostPID). By hand: kubectl --context {context} -n {ns} exec {helper} -- cat /proc/{}/status",
+                id.pid
+            ));
+            d.notes.push("'rtop' in the Kernel tab means the reader shell in the helper pod".into());
+            return Ok(d);
+        }
+        let Target::Pod { context, namespace, pod, .. } = &self.target else { bail!("not a pod target") };
         // Where the reader runs: the container itself, or its debug
         // container. In a shared namespace (or next to a debug container)
         // the process itself may be in another container.
@@ -444,6 +742,9 @@ impl Collector for KubeCollector {
     }
 
     fn signal(&mut self, id: ProcId, signal: &str) -> anyhow::Result<()> {
+        if self.node.is_some() {
+            bail!("node mode is read-only: signals are sent only inside a pod (rtop k8s --pod ... --allow-actions)");
+        }
         let s = self.sessions.iter_mut().find(|s| s.space == id.space).ok_or_else(|| anyhow!("no reader"))?;
         if !s.signal(&mut self.k, signal, id.pid) {
             bail!("container {} is not connected", s.container);
@@ -530,6 +831,71 @@ mod tests {
         label(&mut det, "[multi/sidecar]");
         assert!(det.overview.iter().all(|f| f.source.starts_with("[multi/sidecar] ")));
         assert!(!det.limits.is_empty() && !det.regions.is_empty());
+    }
+
+    /// T036/T044: a reader in a hostPID helper on kind. Processes of pods
+    /// are attributed through the node index, the rest is `host`.
+    #[test]
+    fn node_capture_attributes_processes() {
+        let path = format!("{}/tests/fixtures/kube/pods-on-node.json", env!("CARGO_MANIFEST_DIR"));
+        let list: k8s_openapi::List<k8s_openapi::api::core::v1::Pod> =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let idx = crate::kube::convert::node_index(&list.items);
+        let mut c = KubeCollector {
+            k: crate::kube::client::tests::mocked().0,
+            target: Target::Node {
+                context: "kind-rtop".into(),
+                node: "rtop-control-plane".into(),
+                detail: String::new(),
+            },
+            implicit_context: false,
+            pod: PodInfo { ns: "rtop-demo".into(), name: "rtop-probe".into(), ..Default::default() },
+            sessions: Vec::new(),
+            opening: HashMap::new(),
+            debugging: HashMap::new(),
+            debug_image: String::new(),
+            debug: false,
+            tick: Duration::from_secs(2),
+            epoch: None,
+            notes: Vec::new(),
+            node: Some(NodeMode {
+                info: NodeInfo { name: "rtop-control-plane".into(), ready: true, ..Default::default() },
+                owners: Owners { unmatched: "host".into(), ..Default::default() },
+                pods: 0,
+                image: String::new(),
+                deadline: 3600,
+                replacing: None,
+            }),
+        };
+        c.plan_node_session();
+        c.node_index(idx);
+        assert!(matches!(&c.target, Target::Node { detail, .. } if detail.ends_with("13 pods")));
+        let bytes = fixture("kind-node.bin");
+        let cut = bytes.windows(5).position(|w| w == b"\x1eD 0\n").unwrap() + 5;
+        let s = &mut c.sessions[0];
+        s.phase = Phase::Live;
+        s.stream = Some(1);
+        s.on_data(&bytes[..cut], Instant::now());
+        // The host's /etc/passwd, through /proc/1/root.
+        assert_eq!(s.users.get(&1).map(String::as_str), Some("daemon"));
+        s.tick(&mut c.k, Instant::now(), Duration::from_secs(2));
+        let rest = &bytes[cut..];
+        let cmd_at = rest.windows(5).position(|w| w == b"\x1eD 1\n").unwrap() + 5;
+        s.on_data(&rest[..cmd_at], Instant::now());
+        assert_eq!(s.rows(&mut c.k).len(), 54);
+        s.on_data(&rest[cmd_at..], Instant::now());
+        let rows = s.rows(&mut c.k);
+        let by_pid = |pid| rows.iter().find(|p| p.pid == pid).unwrap().origin.clone().unwrap();
+        let etcd = by_pid(579);
+        assert_eq!(
+            (etcd.pod.as_deref(), etcd.container.as_ref()),
+            (Some("kube-system/etcd-rtop-control-plane"), "etcd")
+        );
+        for host in [1, 130, 744] {
+            assert_eq!(by_pid(host), Origin { pod: None, container: "host".into() }, "pid {host}");
+        }
+        let snap = c.snapshot();
+        assert!(snap.system.net.unwrap().source.contains("/proc/1/net/dev of the node"));
     }
 
     /// T020: two containers each have a PID 1 and a PID 7; merged, they stay

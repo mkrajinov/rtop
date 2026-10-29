@@ -1,9 +1,9 @@
 //! API objects to the plain structs the UI side works with
 //! (contracts/kube-messages.md). Only what rtop shows is kept.
 
-use k8s_openapi::api::core::v1::{ContainerState, Pod};
+use k8s_openapi::api::core::v1::{ContainerState, Node, Pod};
 
-use super::msg::{ContainerInfo, EphemeralInfo, PodInfo, PodSummary, Resources};
+use super::msg::{ContainerInfo, EphemeralInfo, NodeIndex, NodeInfo, PodInfo, PodSummary, Resources};
 
 pub fn pod_info(pod: &Pod) -> PodInfo {
     let meta = &pod.metadata;
@@ -91,6 +91,43 @@ pub fn pod_summary(pod: &Pod) -> PodSummary {
     }
 }
 
+/// Which pod and container each container ID on a node belongs to: regular,
+/// init and ephemeral (rtop's debug containers) alike. A static pod is
+/// also listed under its config hash, which its cgroup path carries
+/// instead of the UID.
+pub fn node_index<'a>(pods: impl IntoIterator<Item = &'a Pod>) -> NodeIndex {
+    let mut idx = NodeIndex::default();
+    for pod in pods {
+        let meta = &pod.metadata;
+        let (Some(uid), Some(ns), Some(name)) = (&meta.uid, &meta.namespace, &meta.name) else { continue };
+        idx.pods.insert(uid.clone(), (ns.clone(), name.clone()));
+        if let Some(hash) = meta.annotations.as_ref().and_then(|a| a.get("kubernetes.io/config.mirror")) {
+            idx.pods.insert(hash.clone(), (ns.clone(), name.clone()));
+        }
+        let Some(st) = &pod.status else { continue };
+        let all = [&st.container_statuses, &st.init_container_statuses, &st.ephemeral_container_statuses];
+        for s in all.into_iter().flatten().flatten() {
+            if let Some(id) = &s.container_id {
+                idx.containers.insert(strip_runtime(id), (uid.clone(), s.name.clone()));
+            }
+        }
+    }
+    idx
+}
+
+pub fn node_info(node: &Node) -> NodeInfo {
+    let status = node.status.as_ref();
+    let ready = status
+        .and_then(|s| s.conditions.as_ref())
+        .and_then(|c| c.iter().find(|c| c.type_ == "Ready"))
+        .is_some_and(|c| c.status == "True");
+    let allocatable = status
+        .and_then(|s| s.allocatable.as_ref())
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.0.clone())).collect())
+        .unwrap_or_default();
+    NodeInfo { name: node.metadata.name.clone().unwrap_or_default(), ready, allocatable, pods: 0 }
+}
+
 /// `containerd://abc…` → `abc…`: the ID as it appears in cgroup paths.
 fn strip_runtime(id: &str) -> String {
     id.split_once("://").map_or(id, |(_, rest)| rest).to_string()
@@ -130,6 +167,29 @@ mod tests {
         let id = app.id.as_deref().unwrap();
         assert!(!id.contains("://") && id.len() == 64, "{id}");
         assert_eq!(p.reason, None);
+    }
+
+    #[test]
+    fn node_index_from_kind() {
+        let path = format!("{}/tests/fixtures/kube/pods-on-node.json", env!("CARGO_MANIFEST_DIR"));
+        let list: k8s_openapi::List<Pod> = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let idx = node_index(&list.items);
+        // etcd is a static pod: found by UID and by its config hash.
+        let etcd = ("kube-system".to_string(), "etcd-rtop-control-plane".to_string());
+        assert_eq!(idx.pods.get("c0d0f78b712ec418cdb01a4fd0426729"), Some(&etcd));
+        let (uid, name) = &idx.containers["55f64133a5719893b6880215988e0e49e5c2d3387898f6dc30f2c32d7d67ecc3"];
+        assert_eq!((idx.pods[uid].1.as_str(), name.as_str()), ("etcd-rtop-control-plane", "etcd"));
+        // rtop's debug container in the distroless pod is indexed too.
+        assert!(idx.containers.values().any(|(_, n)| n.starts_with("rtop-app-")));
+    }
+
+    #[test]
+    fn node_ready_and_allocatable() {
+        let path = format!("{}/tests/fixtures/kube/node.json", env!("CARGO_MANIFEST_DIR"));
+        let n: Node = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let i = node_info(&n);
+        assert!(i.ready && i.name == "rtop-control-plane");
+        assert!(i.allocatable.contains_key("cpu") && i.allocatable.contains_key("memory"));
     }
 
     #[test]

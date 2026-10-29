@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::KubeHandle;
-use super::attribution;
+use super::attribution::Owners;
 use super::msg::{KubeError, Reply, Request, StreamId};
 use super::wire::{self, Decoder, Response};
 use crate::collector::linux_parse::{self as lp, LinuxEnv, ProcFiles};
@@ -64,9 +64,16 @@ pub struct Session {
     /// argv and cgroup by (pid, start time): fetched once per process,
     /// since they rarely change and argv is the biggest file of a snapshot.
     cmdlines: HashMap<(Pid, u64), (Vec<u8>, String)>,
-    /// Pod with one shared PID namespace: container ID → name, to tell the
-    /// containers apart by cgroup. `None`: every process is `container`'s.
-    pub shared: Option<HashMap<String, Arc<str>>>,
+    /// A pod with one shared PID namespace, a debug container, or a node:
+    /// processes are told apart by cgroup. `None`: every process is
+    /// `container`'s.
+    pub shared: Option<Owners>,
+    /// Owner of the reader's own cgroup; default: `exec_in` or `container`
+    /// of this pod.
+    pub own: Option<Origin>,
+    /// Shell assignments run before the reader (node mode points it at the
+    /// host's /etc/passwd and network namespace).
+    pub prelude: String,
     /// The debug container the reader runs in when the image has no shell
     /// (its processes show under this name).
     pub exec_in: Option<Arc<str>>,
@@ -101,6 +108,8 @@ impl Session {
             cmd_sent: None,
             cmdlines: HashMap::new(),
             shared: None,
+            own: None,
+            prelude: String::new(),
             exec_in: None,
             to_close: None,
             kills_sent: HashMap::new(),
@@ -129,7 +138,7 @@ impl Session {
             pod: pod.into(),
             container,
             command: vec!["sh".into()],
-            stdin_init: READER.as_bytes().to_vec(),
+            stdin_init: format!("{}{READER}", self.prelude).into_bytes(),
         })
     }
 
@@ -327,10 +336,12 @@ impl Session {
                     if !p.cmdline.is_empty() {
                         p.cmdline = lp::cmdline(raw, &p.name);
                     }
-                    if let Some(ids) = &self.shared {
-                        let own = self.exec_in.as_ref().unwrap_or(&self.container);
-                        let c = shared_container(ids, cgroup, &p.name, own);
-                        p.origin = Some(Origin { pod: None, container: c });
+                    if let Some(owners) = &self.shared {
+                        let own = self.own.clone().unwrap_or_else(|| Origin {
+                            pod: None,
+                            container: self.exec_in.as_ref().unwrap_or(&self.container).clone(),
+                        });
+                        p.origin = Some(owners.owner(cgroup, &p.name, &own));
                     }
                 }
                 None => {
@@ -366,21 +377,6 @@ impl Session {
             }
         }
         out
-    }
-}
-
-/// Which container of a shared-namespace pod a process is in. The reader
-/// sits in a cgroup namespace, so its own container's cgroup reads as `/`
-/// and the others as `/../cri-containerd-<id>.scope`. The pause container
-/// holds the namespace and is not in the pod status.
-fn shared_container(ids: &HashMap<String, Arc<str>>, cgroup: &str, name: &str, own: &Arc<str>) -> Arc<str> {
-    if cgroup.lines().any(|l| l.trim_end() == "0::/") {
-        return own.clone();
-    }
-    match attribution::container_id(cgroup).and_then(|id| ids.get(id)) {
-        Some(c) => c.clone(),
-        None if name == "pause" => "pause".into(),
-        None => "?".into(),
     }
 }
 

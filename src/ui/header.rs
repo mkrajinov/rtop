@@ -469,9 +469,15 @@ pub fn draw_target(f: &mut Frame, app: &App, area: Rect) {
                 spans.extend([sep(), Span::styled(format!("node {n}"), theme::dim())]);
             }
         }
-        Target::Node { context, node } => {
+        Target::Node { context, node, detail } => {
             spans.push(Span::styled(context.clone(), ctx_style));
+            if link.implicit_context {
+                spans.push(Span::styled(" (current context)", Style::default().fg(p.warn)));
+            }
             spans.extend([sep(), Span::styled(format!("node {node}"), theme::bold())]);
+            if !detail.is_empty() {
+                spans.extend([sep(), Span::styled(detail.clone(), theme::dim())]);
+            }
         }
     }
     if let Some(age) = link.stale {

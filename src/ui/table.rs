@@ -40,11 +40,18 @@ fn command_spans(cmdline: &str, name: &str, show_path: bool) -> Vec<Span<'static
     v
 }
 
-/// `container`: width of the longest container name on screen.
-fn width(c: Column, container: u16) -> Constraint {
+/// Widths of the name columns, sized to their longest value on screen.
+#[derive(Clone, Copy)]
+struct Names {
+    pod: u16,
+    container: u16,
+}
+
+fn width(c: Column, names: Names) -> Constraint {
     match c {
         Column::Pid => Constraint::Length(7),
-        Column::Container => Constraint::Length(container),
+        Column::Pod => Constraint::Length(names.pod),
+        Column::Container => Constraint::Length(names.container),
         Column::User => Constraint::Length(12),
         Column::State => Constraint::Length(2),
         Column::Pri | Column::Nice => Constraint::Length(4),
@@ -71,11 +78,11 @@ fn mini_bar(frac: f32) -> String {
 }
 
 fn is_numeric(c: Column) -> bool {
-    !matches!(c, Column::Container | Column::User | Column::State | Column::Command)
+    !matches!(c, Column::Pod | Column::Container | Column::User | Column::State | Column::Command)
 }
 
-fn min_width(c: Column, container: u16) -> u16 {
-    match width(c, container) {
+fn min_width(c: Column, names: Names) -> u16 {
+    match width(c, names) {
         Constraint::Length(n) | Constraint::Min(n) => n + 2,
         _ => 0,
     }
@@ -83,11 +90,11 @@ fn min_width(c: Column, container: u16) -> u16 {
 
 /// Drop the least essential columns until the rest fit, so narrow terminals
 /// (or an open explain panel) never truncate PIDs.
-fn visible_columns(mut cols: Vec<Column>, avail: u16, container: u16) -> Vec<Column> {
+fn visible_columns(mut cols: Vec<Column>, avail: u16, names: Names) -> Vec<Column> {
     const DROP_ORDER: [Column; 6] =
         [Column::Pri, Column::Vsz, Column::Time, Column::Fds, Column::Threads, Column::User];
     for drop in DROP_ORDER {
-        if cols.iter().map(|&c| min_width(c, container)).sum::<u16>() <= avail {
+        if cols.iter().map(|&c| min_width(c, names)).sum::<u16>() <= avail {
             break;
         }
         cols.retain(|&c| c != drop);
@@ -96,10 +103,13 @@ fn visible_columns(mut cols: Vec<Column>, avail: u16, container: u16) -> Vec<Col
 }
 
 pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
-    // Container names such as `rtop-sb-shard-140-1a2b3` must not be cut.
-    let container = app.snapshot.processes.iter().map(|p| crate::app::container(p).chars().count()).max().unwrap_or(0);
-    let container = (container as u16).clamp(9, 40);
-    let cols = visible_columns(app.columns(), area.width.saturating_sub(2), container);
+    // Names such as `rtop-sb-shard-140-1a2b3` must not be cut.
+    let longest = |f: fn(&crate::model::Process) -> &str| {
+        app.snapshot.processes.iter().map(|p| f(p).chars().count()).max().unwrap_or(0) as u16
+    };
+    let names =
+        Names { pod: longest(crate::app::pod).clamp(4, 48), container: longest(crate::app::container).clamp(9, 40) };
+    let cols = visible_columns(app.columns(), area.width.saturating_sub(2), names);
     let header = Row::new(cols.iter().map(|&c| {
         let arrow = if c == app.sort { if app.sort_desc { "▼" } else { "▲" } } else { "" };
         let mut style = Style::default().fg(theme::pal().dim);
@@ -161,6 +171,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
         };
         let cells = vec![
             num(p.pid.to_string()).style(theme::dim()),
+            Cell::from(crate::app::pod(p).to_string()).style(theme::text()),
             Cell::from(crate::app::container(p).to_string()).style(Style::default().fg(theme::pal().code)),
             Cell::from(p.user.clone()).style(user_style),
             Cell::from(p.state.letter().to_string()).style(theme::state(p.state)),
@@ -218,7 +229,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
     if let Some(lab) = &app.lab {
         title.push_str(&format!(" · lab '{}' process group {}", lab.lab.name, lab.pgid));
     }
-    let table = Table::new(rows, cols.iter().map(|&c| width(c, container)))
+    let table = Table::new(rows, cols.iter().map(|&c| width(c, names)))
         .header(header)
         .block(panel(&title))
         .column_spacing(2)

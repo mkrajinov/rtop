@@ -31,10 +31,9 @@ late responses after a timeout are discarded.
 
 | Request | Response frames |
 |---|---|
-| `hello` (sent by the script itself on start, seq 0) | `version` (`1`), `pid` (the reader's own PID, labelled in the table), `uname` (`uname -r` or empty), `passwd` (`/etc/passwd`), `pagesize` (`getconf PAGESIZE`, often missing), `statm` and `status` of the reader (rtop derives the page size from them when `getconf` is missing) |
+| `hello` (sent by the script itself on start, seq 0) | `version` (`1`), `pid` (the reader's own PID, labelled in the table), `uname` (`uname -r` or empty), `passwd` (`$RTOP_ROOT/etc/passwd`), `pagesize` (`getconf PAGESIZE`, often missing), `statm` and `status` of the reader (rtop derives the page size from them when `getconf` is missing) |
 | `snap <seq> [cgroup-root]` | `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/uptime`, `/proc/net/dev`, `/proc/diskstats`, then one `p <pid>` frame per process, then cgroup files under `cgroup-root` if given |
 | `cmd <seq> <pid>…` | `/proc/<pid>/cmdline` and `/proc/<pid>/cgroup` frames per pid (the cgroup tells containers apart in a shared PID namespace) |
-| `cg <seq> <pid>…` | one `/proc/<pid>/cgroup` frame per pid (node mode attribution) |
 | `details <seq> <pid>` | `status`, `cmdline`, `environ`, `io`, `limits`, `cgroup`, `schedstat`, `smaps_rollup`, `maps`, `wchan`, `oom_score`, `oom_score_adj`, links `exe`, `cwd`, `ns/*`, `fd/*` (as `L <fd> <target>` lines), `task/*/stat`, `net/tcp`, `tcp6`, `udp`, `udp6`, `unix` |
 | `kill <seq> <SIG> <pid>` | `rc` frame with the exit status and stderr of `kill` |
 | `renice <seq> <n> <pid>` | `rc` frame |
@@ -45,6 +44,11 @@ real UID) and `<fd count>` (`-1` when `fd/` is unreadable).
 
 The link frames come from `readlink`. If `readlink` is missing, the shell reports
 `ls -l` output, which the parser also accepts.
+
+Node mode writes `RTOP_ROOT=/proc/1/root` and `RTOP_NET=/proc/1/net` before the script: the
+`passwd` frame is then the host's, and the `/proc/net/dev` frame is read from `$RTOP_NET/dev`
+(the host's network namespace) under the same name. `cmd` already returns each process's
+cgroup, so node mode needs no separate request.
 
 ## Timeouts
 

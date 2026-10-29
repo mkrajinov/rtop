@@ -24,7 +24,12 @@ Kubernetes (reads `/proc` inside pods over `pods/exec`; read-only unless `--allo
 rtop k8s                                # pick a namespace and pod in the current context
 rtop k8s --context kind-rtop -n demo    # another context, starting in namespace demo
 rtop k8s --pod demo/api-7c9f            # straight to one pod; Esc goes back to the list
+rtop k8s --node worker-3 --helper-namespace debug   # every process on a node (read-only)
 ```
+
+`--node` creates a short-lived pod with `hostPID` on that node (labelled
+`app.kubernetes.io/managed-by=rtop`, deleted on exit, at most an hour old). Its namespace must
+allow that under Pod Security (`privileged`).
 
 ## Keys
 

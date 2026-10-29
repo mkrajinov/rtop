@@ -1,0 +1,20 @@
+---
+source: tests/ui.rs
+expression: screen
+---
+ ⎈ kind-rtop · node rtop-control-plane · allocatable 10 cpu 23.4G · 13 pods · via helper pod rtop-demo/rtop-node-x
+ ╭ processes 4 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │     PID  POD                                  CONTAINER  USER          S     NI        CPU%▼        MEM%     RSS   THR  COMMAND                  │
+ │    1696  rtop-demo/multi                      app        learner       S      0          0.0  ▏      0.0    4.0M     1  sleep 3600               │
+ │     942  kube-system/kindnet-r825t            pause      learner       S      0          0.0  ▏      0.0    4.0M     1  pause                    │
+ │     744                                       host       learner       S      0          0.0  ▏      0.0    4.0M     1  kubelet --config=/var/li │
+ │     579  kube-system/etcd-rtop-control-plane  etcd       learner       S      0          0.0  ▏      0.0    4.0M     1  etcd                     │
+ │                                                                                                                                                  │
+ │                                                                                                                                                  │
+ │                                                                                                                                                  │
+ │                                                                                                                                                  │
+ │                                                                                                                                                  │
+ │                                                                                                                                                  │
+ │                                                                                                                                                  │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    Esc  pods    /  filter pod or command    t  tree    f  family    T  theme

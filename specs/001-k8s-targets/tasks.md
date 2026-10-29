@@ -129,34 +129,44 @@ exec first, debug container fallback.
 
 ## Phase 4: User Story 2 - Inspect all processes of a node (Priority: P2)
 
-**Goal**: `rtop --node name` shows every node process with POD/CONTAINER columns, through a
+**Goal**: `rtop k8s --node name` shows every node process with POD/CONTAINER columns, through a
 labelled, self-expiring helper pod.
 
 **Independent Test**: quickstart.md §5 on kind.
 
 ### Tests for User Story 2
 
-- [ ] T035 [P] [US2] Write tests/fixtures/kube/cgroup-paths.txt (systemd and cgroupfs drivers; containerd, cri-o and docker; `/..`-prefixed paths; host processes) and tests/fixtures/kube/pods-on-node.json
-- [ ] T036 [P] [US2] Unit tests for src/kube/attribution.rs against cgroup-paths.txt, including pod UID `_`→`-` and no match → `host`
-- [ ] T037 [P] [US2] Unit test that the pure `helper::manifest()` builds the typed `Pod` from contracts/helper-pod.yaml (labels, deadline, hostPID, SYS_PTRACE, read-only cgroup mount), plus mock tests for create→Running, admission rejection→`Admission`, and GC by label, in src/kube/helper.rs
-- [ ] T038 [P] [US2] Snapshot test in tests/ui.rs: node-mode fixture with POD and CONTAINER columns and `host` rows
+- [X] T035 [P] [US2] Write tests/fixtures/kube/cgroup-paths.txt (systemd and cgroupfs drivers; containerd, cri-o and docker; `/..`-prefixed paths; host processes) and tests/fixtures/kube/pods-on-node.json
+  - Done: real lines from a hostPID busybox pod on kind (containerd, systemd driver, relative `/../..` paths, static-pod hashes) plus cri-o, docker, cgroupfs and Guaranteed-QoS paths; `pods-on-node.json` and `node.json` trimmed from the same cluster.
+- [X] T036 [P] [US2] Unit tests for src/kube/attribution.rs against cgroup-paths.txt, including pod UID `_`→`-` and no match → `host`
+  - Done: `fixture_paths` checks every line; `owners_on_a_node` covers pause via pod UID, `host`, and the helper's own `0::/`.
+- [X] T037 [P] [US2] Unit test that the pure `helper::manifest()` builds the typed `Pod` from contracts/helper-pod.yaml (labels, deadline, hostPID, SYS_PTRACE, read-only cgroup mount), plus mock tests for create→Running, admission rejection→`Admission`, and GC by label, in src/kube/helper.rs
+  - Done differently: no cgroup hostPath mount (nothing reads it yet; one host path fewer), `capabilities.drop: [ALL]` plus SYS_PTRACE, `automountServiceAccountToken: false`, and an `rtop.io/role: node-helper` label that GC selects on. GC test asserts a Running helper is left alone.
+- [X] T038 [P] [US2] Snapshot test in tests/ui.rs: node-mode fixture with POD and CONTAINER columns and `host` rows
+  - Done: `node_mode_shows_pods_and_host`, which also checks that `/multi` filters by pod and that `k` stays off.
 
 ### Implementation for User Story 2
 
-- [ ] T039 [US2] Implement the pure `attribution::parse(path) -> Option<(pod_uid, container_id)>` in src/kube/attribution.rs (research R9)
-- [ ] T040 [US2] Helper pod lifecycle in src/kube/helper.rs (`HelperCreate`, `HelperDelete`, `HelperGc`):
+- [X] T039 [US2] Implement the pure `attribution::parse(path) -> Option<(pod_uid, container_id)>` in src/kube/attribution.rs (research R9)
+  - Done differently: `container_id()` and `pod_uid()` (from US1) plus `Owners::owner()`, which maps a cgroup to pod and container, falls back to the pod's `pause` by UID or config hash, and to `host`. Static pods carry a 32-hex config hash, matched through the mirror pod's `kubernetes.io/config.mirror` annotation.
+- [X] T040 [US2] Helper pod lifecycle in src/kube/helper.rs (`HelperCreate`, `HelperDelete`, `HelperGc`):
   - create with `Api::<Pod>::create`;
   - wait for Running via a watcher (60 s; on failure list events and show the admission message);
   - delete on exit, Ctrl-C, SIGTERM and from the panic hook;
   - delete finished helpers found by label at start;
   - `RTOP_HELPER_DEADLINE` override;
   - `--helper-namespace` flag.
-- [ ] T041 [US2] NodeIndex:
+  - Done: create, wait for Running (image pull and stuck reasons reported), delete with grace 0, GC of finished helpers only. Deletion runs from `KubeCollector::drop`, so normal exit, Ctrl-C/SIGTERM and unwinding panics all delete; failures are printed after the TUI closes. When the helper ends (deadline, deleted), rtop deletes it and creates a new one. No event listing on failure: the admission message from the create call is shown instead.
+- [X] T041 [US2] NodeIndex:
   - in src/kube/client.rs, `WatchNodePods` runs a watcher on pods with field selector `spec.nodeName=<node>`, kept in a map and sent as `Event::NodeIndex` debounced to 1 s, through the pure `convert::node_index`;
   - in src/collector/kube.rs, send `cg` requests for new PIDs and set `origin.pod`/`origin.container`.
-- [ ] T042 [US2] Node session in src/collector/kube.rs: user names from `/proc/1/root/etc/passwd`, `[node/host]` provenance, node system cards, plus allocatable capacity and pod count from `GetNode` (FR-010)
-- [ ] T043 [US2] `--node` flag in src/main.rs and the POD column in src/ui/table.rs; `/` filter matches the pod name
-- [ ] T044 [US2] Validate quickstart.md §5 on kind, including no leftover helper after quit and expiry with `RTOP_HELPER_DEADLINE=60`; capture snap-node.bin
+  - Done differently: no `cg` request; the existing `cmd` request already returns each process's cgroup. Init and ephemeral container IDs are indexed too.
+- [X] T042 [US2] Node session in src/collector/kube.rs: user names from `/proc/1/root/etc/passwd`, `[node/host]` provenance, node system cards, plus allocatable capacity and pod count from `GetNode` (FR-010)
+  - Done: the reader gets `RTOP_ROOT=/proc/1/root` and `RTOP_NET=/proc/1/net` before the script, so passwd and network counters are the host's. Provenance is `[node <name>]`; the header shows allocatable CPU and memory and the pod count. Node mode is read-only even with `--allow-actions`: root in a hostPID pod can signal the kubelet, with or without capabilities.
+- [X] T043 [US2] `--node` flag in src/main.rs and the POD column in src/ui/table.rs; `/` filter matches the pod name
+  - Done: `rtop k8s --node NODE [--helper-namespace NS]`; POD column sized to the longest name; the filter matches the pod.
+- [X] T044 [US2] Validate quickstart.md §5 on kind, including no leftover helper after quit and expiry with `RTOP_HELPER_DEADLINE=60`; capture snap-node.bin
+  - Done: on kind, 53 processes in one snapshot (about 30 ms in the reader); no helper left after `q`, SIGTERM or Esc back to the picker; `RTOP_HELPER_DEADLINE=40` replaced the helper and removed the old one; a `baseline` namespace gives the admission message. Captured as `kind-node.bin` instead of `snap-node.bin`.
 
 **Checkpoint**: Stories 1 and 2 both work independently.
 

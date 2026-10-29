@@ -228,3 +228,46 @@ fn long_container_names_are_not_cut() {
     let screen = render(&mut app, 130, 16);
     assert!(screen.contains("rtop-sb-shard-140-1a2b3 "), "{screen}");
 }
+
+#[test]
+fn node_mode_shows_pods_and_host() {
+    use rtop::collector::fixture::process;
+    use rtop::model::{Link, Origin, Target};
+    let mut c = FixtureCollector::default();
+    c.snapshot.processes.clear();
+    for (pid, pod, container, cmd) in [
+        (744, None, "host", "kubelet --config=/var/lib/kubelet/config.yaml"),
+        (579, Some("kube-system/etcd-rtop-control-plane"), "etcd", "etcd --data-dir=/var/lib/etcd"),
+        (942, Some("kube-system/kindnet-r825t"), "pause", "pause"),
+        (1696, Some("rtop-demo/multi"), "app", "sleep 3600"),
+    ] {
+        let mut p = process(pid, 1, cmd.split(' ').next().unwrap());
+        p.cmdline = cmd.into();
+        p.origin = Some(Origin { pod: pod.map(Into::into), container: container.into() });
+        c.snapshot.processes.push(p);
+    }
+    c.target = Some(Target::Node {
+        context: "kind-rtop".into(),
+        node: "rtop-control-plane".into(),
+        detail: "allocatable 10 cpu 23.4G · 13 pods".into(),
+    });
+    c.link =
+        Some(Link { implicit_context: false, stale: None, notes: vec!["via helper pod rtop-demo/rtop-node-x".into()] });
+    let mut app = App::new(Box::new(c));
+    app.refresh();
+    let screen = render(&mut app, 150, 16);
+    assert!(screen.contains("POD") && screen.contains("kube-system/etcd-rtop-control-plane"), "{screen}");
+    insta::assert_snapshot!(screen);
+
+    // `/` matches the pod name.
+    press(&mut app, KeyCode::Char('/'));
+    for ch in "multi".chars() {
+        press(&mut app, KeyCode::Char(ch));
+    }
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.rows.len(), 1);
+    // Node mode is read-only, whatever --allow-actions says.
+    app.allow_actions = true;
+    press(&mut app, KeyCode::Char('k'));
+    assert_eq!(app.mode, rtop::app::Mode::Table);
+}

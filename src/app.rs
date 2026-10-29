@@ -16,6 +16,8 @@ use crate::ui::theme;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Column {
     Pid,
+    /// Only shown for a Kubernetes node.
+    Pod,
     /// Only shown for a Kubernetes target.
     Container,
     User,
@@ -33,8 +35,9 @@ pub enum Column {
 }
 
 impl Column {
-    pub const ALL: [Column; 14] = [
+    pub const ALL: [Column; 15] = [
         Column::Pid,
+        Column::Pod,
         Column::Container,
         Column::User,
         Column::State,
@@ -53,6 +56,7 @@ impl Column {
     pub fn title(self) -> &'static str {
         match self {
             Column::Pid => "PID",
+            Column::Pod => "POD",
             Column::Container => "CONTAINER",
             Column::User => "USER",
             Column::State => "S",
@@ -73,6 +77,7 @@ impl Column {
     pub fn key(self) -> &'static str {
         match self {
             Column::Pid => "pid",
+            Column::Pod => "pod",
             Column::Container => "container",
             Column::User => "uid",
             Column::State => "state",
@@ -91,12 +96,13 @@ impl Column {
 
     /// Numeric columns sort largest-first by default.
     fn default_desc(self) -> bool {
-        !matches!(self, Column::Pid | Column::Container | Column::User | Column::Command | Column::State)
+        !matches!(self, Column::Pid | Column::Pod | Column::Container | Column::User | Column::Command | Column::State)
     }
 
     fn cmp(self, a: &Process, b: &Process) -> std::cmp::Ordering {
         match self {
             Column::Pid => a.pid.cmp(&b.pid),
+            Column::Pod => pod(a).cmp(pod(b)),
             Column::Container => container(a).cmp(container(b)),
             Column::User => a.user.cmp(&b.user),
             Column::State => a.state.letter().cmp(&b.state.letter()),
@@ -117,6 +123,12 @@ impl Column {
 /// The container a process runs in; empty in local mode.
 pub fn container(p: &Process) -> &str {
     p.origin.as_ref().map_or("", |o| &o.container)
+}
+
+/// `namespace/name` of the pod a node process belongs to; empty for host
+/// processes and outside node mode.
+pub fn pod(p: &Process) -> &str {
+    p.origin.as_ref().and_then(|o| o.pod.as_deref()).unwrap_or("")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -485,7 +497,8 @@ impl App {
                     || p.cmdline.to_lowercase().contains(&needle)
                     || p.name.to_lowercase().contains(&needle)
                     || p.user.to_lowercase().contains(&needle)
-                    || container(p).to_lowercase().contains(&needle))
+                    || container(p).to_lowercase().contains(&needle)
+                    || pod(p).to_lowercase().contains(&needle))
         };
         let mut keep: HashSet<ProcId> = procs
             .iter()
@@ -744,7 +757,8 @@ impl App {
     /// The table's columns: CONTAINER only when reading a Kubernetes target.
     pub fn columns(&self) -> Vec<Column> {
         let remote = self.collector.target().is_some();
-        Column::ALL.into_iter().filter(|&c| remote || c != Column::Container).collect()
+        let node = matches!(self.collector.target(), Some(Target::Node { .. }));
+        Column::ALL.into_iter().filter(|&c| (remote || c != Column::Container) && (node || c != Column::Pod)).collect()
     }
 
     /// `C`: all containers → the first → the next … → all again.
@@ -769,6 +783,10 @@ impl App {
     fn remote_blocked(&mut self) -> bool {
         if self.collector.target().is_none() {
             return false;
+        }
+        if matches!(self.collector.target(), Some(Target::Node { .. })) {
+            self.set_status("node mode is read-only: signals are only sent inside a pod (--pod with --allow-actions)");
+            return true;
         }
         if !self.allow_actions {
             self.set_status("read-only: start rtop with --allow-actions to send signals in Kubernetes mode");

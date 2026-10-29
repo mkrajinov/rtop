@@ -48,6 +48,12 @@ struct K8sArgs {
     /// Open this pod directly instead of the picker.
     #[arg(long, value_name = "[NAMESPACE/]POD")]
     pod: Option<String>,
+    /// Every process of this node, through a short-lived hostPID helper pod (read-only).
+    #[arg(long, value_name = "NODE", conflicts_with = "pod")]
+    node: Option<String>,
+    /// Namespace for the node helper pod; it must allow hostPID [default: --namespace, else the context's].
+    #[arg(long, value_name = "NAMESPACE", requires = "node")]
+    helper_namespace: Option<String>,
     /// Namespace of --pod, or the one the picker starts in [default: the context's namespace].
     #[arg(short = 'n', long)]
     namespace: Option<String>,
@@ -183,15 +189,30 @@ fn k8s(args: K8sArgs, tick: Duration) -> anyhow::Result<()> {
         None => (args.namespace.clone(), None),
     };
     let mut picker = Picker::connect(args.context.clone(), pod_ns.clone())?;
-    let first = match pod {
-        Some(pod) => Some(KubeCollector::connect(pod_options(&args, &picker, picker.ns.clone(), pod, tick))?),
-        None => None,
+    let first = match (pod, &args.node) {
+        (Some(pod), _) => Some(KubeCollector::connect(pod_options(&args, &picker, picker.ns.clone(), pod, tick))?),
+        (None, Some(node)) => {
+            eprintln!("starting a helper pod on node {node} …");
+            Some(KubeCollector::connect_node(collector::kube::NodeOptions {
+                context: Some(picker.context.clone()),
+                implicit_context: picker.implicit_context,
+                node: node.clone(),
+                helper_namespace: args.helper_namespace.clone().or_else(|| args.namespace.clone()),
+                tick,
+                image: args.debug_image.clone(),
+            })?)
+        }
+        (None, None) => None,
     };
 
     install_quit_signals()?;
     let mut terminal = ratatui::init();
     let result = k8s_loop(&mut terminal, &mut picker, first, &args, tick);
     ratatui::restore();
+    // Helper pods that could not be deleted (the views are gone by now).
+    for cmd in collector::kube::LEFTOVER.lock().map(|l| l.clone()).unwrap_or_default() {
+        eprintln!("rtop could not delete its helper pod; remove it with: {cmd}");
+    }
     Ok(result?)
 }
 
@@ -236,7 +257,10 @@ fn k8s_loop(
         let mut app = App::new(Box::new(collector));
         app.tick = tick;
         app.container = container.take();
-        app.allow_actions = args.allow_actions;
+        // Node mode stays read-only: root in a hostPID pod could signal
+        // the kubelet.
+        let node = matches!(app.collector.target(), Some(rtop::model::Target::Node { .. }));
+        app.allow_actions = args.allow_actions && !node;
         app.can_go_back = true;
         run(terminal, &mut app)?;
         if !app.back {
@@ -374,5 +398,8 @@ mod tests {
         assert!(parse("rtop k8s --pod rtop-demo/multi -c app --allow-actions").is_ok());
         // A container only makes sense for a named pod.
         assert!(parse("rtop k8s -c app").is_err());
+        assert!(parse("rtop k8s --node n1 --helper-namespace rtop-demo").is_ok());
+        assert!(parse("rtop k8s --node n1 --pod x").is_err());
+        assert!(parse("rtop k8s --helper-namespace x").is_err());
     }
 }

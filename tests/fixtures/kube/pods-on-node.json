@@ -1,0 +1,580 @@
+{
+ "apiVersion": "v1",
+ "kind": "PodList",
+ "metadata": {},
+ "items": [
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "coredns-559f6c778d-s8j2g",
+    "namespace": "kube-system",
+    "uid": "b134f042-30d9-43ea-a147-8b03d568b9b9",
+    "creationTimestamp": "2026-10-29T18:07:52Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "coredns",
+      "image": "registry.k8s.io/coredns/coredns:v1.14.6"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "coredns",
+      "containerID": "containerd://a934e5e93242eeb8595d1218c949b67a7ffd07ea54780a6ed7f90867ff598b8d",
+      "ready": true,
+      "restartCount": 0,
+      "image": "registry.k8s.io/coredns/coredns:v1.14.6",
+      "imageID": "sha256:fbccbf70a429fb9ce1cdb13a40ed96b16272ef763dafe050b2c0d121dd29811b",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:08:05Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "coredns-559f6c778d-swhbd",
+    "namespace": "kube-system",
+    "uid": "f891a371-b804-4f9a-a512-c41e79601516",
+    "creationTimestamp": "2026-10-29T18:07:52Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "coredns",
+      "image": "registry.k8s.io/coredns/coredns:v1.14.6"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "coredns",
+      "containerID": "containerd://ea701b354917e561e872ba868ca1f92c0b9975f3da4e2e96d573f523237d1c36",
+      "ready": true,
+      "restartCount": 0,
+      "image": "registry.k8s.io/coredns/coredns:v1.14.6",
+      "imageID": "sha256:fbccbf70a429fb9ce1cdb13a40ed96b16272ef763dafe050b2c0d121dd29811b",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:08:05Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "etcd-rtop-control-plane",
+    "namespace": "kube-system",
+    "uid": "1705cb4e-c55c-42b1-beed-0d08820712d5",
+    "creationTimestamp": "2026-10-29T18:07:45Z",
+    "annotations": {
+     "kubernetes.io/config.mirror": "c0d0f78b712ec418cdb01a4fd0426729"
+    }
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "etcd",
+      "image": "registry.k8s.io/etcd:3.7.0-0"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "etcd",
+      "containerID": "containerd://55f64133a5719893b6880215988e0e49e5c2d3387898f6dc30f2c32d7d67ecc3",
+      "ready": true,
+      "restartCount": 0,
+      "image": "registry.k8s.io/etcd:3.7.0-0",
+      "imageID": "sha256:c2e426bbd1cd63b4d1cbdca2eba371a0a2e64b6934dcc48c51a62d488fe64fe8",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:07:40Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "kindnet-r825t",
+    "namespace": "kube-system",
+    "uid": "16796b5d-f12f-404c-bd16-26bf8ba24751",
+    "creationTimestamp": "2026-10-29T18:07:52Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "kindnet-cni",
+      "image": "docker.io/kindest/kindnetd:v20260820-69b56db7"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "kindnet-cni",
+      "containerID": "containerd://51331614667ee7dcf69501ad9a51d27379137619ee43407c9be3a3e85473f4ed",
+      "ready": true,
+      "restartCount": 0,
+      "image": "docker.io/kindest/kindnetd:v20260820-69b56db7",
+      "imageID": "sha256:8e13ccc0aaa682502a49e5f98b88acf75fbf5f724875058b3e7a78b1f38a11e7",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:07:53Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "kube-apiserver-rtop-control-plane",
+    "namespace": "kube-system",
+    "uid": "ca9449d6-d32e-4bca-88db-2b4a52453fae",
+    "creationTimestamp": "2026-10-29T18:07:45Z",
+    "annotations": {
+     "kubernetes.io/config.mirror": "cdbdd07f710e0e12fcbebb7701ea9df7"
+    }
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "kube-apiserver",
+      "image": "registry.k8s.io/kube-apiserver:v1.37.0"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "kube-apiserver",
+      "containerID": "containerd://149703897862010c23c77d8784cb11c8c738a89f58e13058e0bc8c5921b25660",
+      "ready": true,
+      "restartCount": 0,
+      "image": "registry.k8s.io/kube-apiserver-arm64:v1.37.0",
+      "imageID": "docker.io/library/import-2026-08-26@sha256:4fbbef5581e6ed60b96426e3786371b57da07f66e350b4ff2b0077413c2b0444",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:07:40Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "kube-controller-manager-rtop-control-plane",
+    "namespace": "kube-system",
+    "uid": "ebd440fc-719f-4073-acb0-69bdb6900c8c",
+    "creationTimestamp": "2026-10-29T18:07:45Z",
+    "annotations": {
+     "kubernetes.io/config.mirror": "ce429376fcbd55bfe269de41262f0d15"
+    }
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "kube-controller-manager",
+      "image": "registry.k8s.io/kube-controller-manager:v1.37.0"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "kube-controller-manager",
+      "containerID": "containerd://0e58383d590b0aad15e64d1e8762e9007af29f7d905e3480c43f07b9421f977c",
+      "ready": true,
+      "restartCount": 0,
+      "image": "registry.k8s.io/kube-controller-manager-arm64:v1.37.0",
+      "imageID": "docker.io/library/import-2026-08-26@sha256:dda35f6553455c1dde75aebfbb20759d24b7de776b884eb06415f242f276200c",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:07:40Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "kube-proxy-gdf7b",
+    "namespace": "kube-system",
+    "uid": "9ab0cf4e-2e37-4742-8300-bfa400d56950",
+    "creationTimestamp": "2026-10-29T18:07:52Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "kube-proxy",
+      "image": "registry.k8s.io/kube-proxy:v1.37.0"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "kube-proxy",
+      "containerID": "containerd://d9b0f46fce6c08a2dbf22a32dca258f4c123d17df0818c4d819a1541f1f4c91b",
+      "ready": true,
+      "restartCount": 0,
+      "image": "registry.k8s.io/kube-proxy-arm64:v1.37.0",
+      "imageID": "docker.io/library/import-2026-08-26@sha256:d5e740cce95911da5590b633aae2f7f7e3370ec9d212d4dbbbf3bf19fa07551f",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:07:53Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "kube-scheduler-rtop-control-plane",
+    "namespace": "kube-system",
+    "uid": "9cc326f9-fc11-4be5-9b84-76c672194e53",
+    "creationTimestamp": "2026-10-29T18:07:45Z",
+    "annotations": {
+     "kubernetes.io/config.mirror": "d8bcac0add2182ad6caea6d3dab470f3"
+    }
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "kube-scheduler",
+      "image": "registry.k8s.io/kube-scheduler:v1.37.0"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "kube-scheduler",
+      "containerID": "containerd://ef79c53fe10b098d5940b4e51a5b0b2a7a3ab961995c16ad1acd57707cc18f0d",
+      "ready": true,
+      "restartCount": 0,
+      "image": "registry.k8s.io/kube-scheduler-arm64:v1.37.0",
+      "imageID": "docker.io/library/import-2026-08-26@sha256:2aa78b45454b3df79d15bf6a57b4f9871f11ce16c8b645109ba2310076d228dd",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:07:40Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "local-path-provisioner-75f7fc7dc5-cszxn",
+    "namespace": "local-path-storage",
+    "uid": "a3518b47-bae1-40a9-80de-1696a9d64afe",
+    "creationTimestamp": "2026-10-29T18:07:52Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "local-path-provisioner",
+      "image": "docker.io/kindest/local-path-provisioner:v20260820-69b56db7"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "local-path-provisioner",
+      "containerID": "containerd://1b8b2a907ca6f6e086562c126a15fa7a97ae72690af873c3598a7a5c4fe4e058",
+      "ready": true,
+      "restartCount": 0,
+      "image": "docker.io/kindest/local-path-provisioner:v20260820-69b56db7",
+      "imageID": "sha256:0771a8a05619f4bb6f4c8484f942f509b21a04ebe56ee26d17a3006e250bfd46",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:08:05Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "distroless",
+    "namespace": "rtop-demo",
+    "uid": "23cda5c8-373a-40ff-90ef-d44b06e574d2",
+    "creationTimestamp": "2026-10-29T18:08:37Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "app",
+      "image": "registry.k8s.io/pause:3.10"
+     }
+    ],
+    "ephemeralContainers": [
+     {
+      "name": "rtop-app-37b18",
+      "image": "busybox:1.37"
+     },
+     {
+      "name": "rtop-app-a2850",
+      "image": "busybox:1.37"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "app",
+      "containerID": "containerd://962d9e0e0219441fe6099687b6437788592783c8768fc8d5f9866629e8a1bdd0",
+      "ready": true,
+      "restartCount": 1,
+      "image": "registry.k8s.io/pause:3.10",
+      "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:34:27Z"
+       }
+      }
+     }
+    ],
+    "ephemeralContainerStatuses": [
+     {
+      "name": "rtop-app-37b18",
+      "containerID": "containerd://b3193b1d4d913a6c4dfd51f7c5e23a24842a2e56d6bcf098073f9885d3f9cf79",
+      "ready": false,
+      "restartCount": 0,
+      "image": "docker.io/library/busybox:1.37",
+      "imageID": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "state": {
+       "terminated": {
+        "containerID": "containerd://b3193b1d4d913a6c4dfd51f7c5e23a24842a2e56d6bcf098073f9885d3f9cf79",
+        "exitCode": 0,
+        "finishedAt": "2026-10-29T19:34:32Z",
+        "reason": "Completed",
+        "startedAt": "2026-10-29T18:34:32Z"
+       }
+      }
+     },
+     {
+      "name": "rtop-app-a2850",
+      "containerID": "containerd://313784695b47cb0093fc44cb08715ef34643cbf6fa7add3e9dfc912d0c173534",
+      "ready": false,
+      "restartCount": 0,
+      "image": "docker.io/library/busybox:1.37",
+      "imageID": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "state": {
+       "terminated": {
+        "containerID": "containerd://313784695b47cb0093fc44cb08715ef34643cbf6fa7add3e9dfc912d0c173534",
+        "exitCode": 137,
+        "finishedAt": "2026-10-29T18:34:27Z",
+        "reason": "Error",
+        "startedAt": "2026-10-29T18:23:38Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "limited",
+    "namespace": "rtop-demo",
+    "uid": "c693d1c9-c6bd-443c-88a6-0f663f791fc9",
+    "creationTimestamp": "2026-10-29T18:07:52Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "app",
+      "image": "busybox:1.37"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "app",
+      "containerID": "containerd://11de4090173e06e6d22067bf24a2d07d382297466acd0eeed7b869a7b11cd65c",
+      "ready": true,
+      "restartCount": 0,
+      "image": "docker.io/library/busybox:1.37",
+      "imageID": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:08:07Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "multi",
+    "namespace": "rtop-demo",
+    "uid": "9055283e-5744-4a54-bbc1-88ab1872e6c7",
+    "creationTimestamp": "2026-10-29T18:08:37Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "app",
+      "image": "busybox:1.37"
+     },
+     {
+      "name": "sidecar",
+      "image": "busybox:1.37"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "app",
+      "containerID": "containerd://d6b0df771ac94e875b8072c211878633bca129f2d8b8e17541871edc0afb9f38",
+      "ready": true,
+      "restartCount": 4,
+      "image": "docker.io/library/busybox:1.37",
+      "imageID": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T21:25:47Z"
+       }
+      }
+     },
+     {
+      "name": "sidecar",
+      "containerID": "containerd://a523d7f87295e739495b06dd1446d6ca4c0562d523d676c9939c59406d20d51b",
+      "ready": true,
+      "restartCount": 0,
+      "image": "docker.io/library/busybox:1.37",
+      "imageID": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:08:38Z"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "apiVersion": "v1",
+   "kind": "Pod",
+   "metadata": {
+    "name": "shared",
+    "namespace": "rtop-demo",
+    "uid": "2b4d0d86-0f6b-4133-90ff-ed57c98a2de1",
+    "creationTimestamp": "2026-10-29T18:07:52Z"
+   },
+   "spec": {
+    "nodeName": "rtop-control-plane",
+    "containers": [
+     {
+      "name": "app",
+      "image": "busybox:1.37"
+     },
+     {
+      "name": "sidecar",
+      "image": "busybox:1.37"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "app",
+      "containerID": "containerd://db47524a60c4cb07c51f823d8cd8e6f7b30e7ecc55417ac8bcd71e18e0f37833",
+      "ready": true,
+      "restartCount": 3,
+      "image": "docker.io/library/busybox:1.37",
+      "imageID": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T21:08:11Z"
+       }
+      }
+     },
+     {
+      "name": "sidecar",
+      "containerID": "containerd://c4a3b5ea468cbb490db9f2fe78d47d4fa0aec67665a2c9c068dfb24e00fe9544",
+      "ready": true,
+      "restartCount": 0,
+      "image": "docker.io/library/busybox:1.37",
+      "imageID": "docker.io/library/busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "state": {
+       "running": {
+        "startedAt": "2026-10-29T18:08:09Z"
+       }
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -16,9 +16,11 @@ pub mod wire;
 #[cfg(feature = "kube")]
 pub(crate) mod client;
 #[cfg(feature = "kube")]
-mod convert;
+pub(crate) mod convert;
 #[cfg(feature = "kube")]
 mod ephemeral;
+#[cfg(feature = "kube")]
+pub mod helper;
 #[cfg(feature = "kube")]
 pub mod msg;
 #[cfg(feature = "kube")]
