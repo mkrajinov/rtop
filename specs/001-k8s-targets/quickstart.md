@@ -121,7 +121,8 @@ While attached to the node:
 ```sh
 kubectl --context kind-rtop -n rtop-demo top pod -l app.kubernetes.io/managed-by=rtop
 ```
-The helper uses ≤ 10m CPU (1% of one core) at the default 2 s tick.
+The helper uses about 10m CPU (1% of one core) on kind at the node default of 3 s. Without
+metrics-server, read its `/sys/fs/cgroup/cpu.stat` (`usage_usec`) twice with `kubectl exec`.
 
 ## Cleanup
 

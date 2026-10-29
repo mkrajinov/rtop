@@ -1,7 +1,9 @@
-# Minimum permissions per rtop Kubernetes mode (FR-013). Copied into the README.
-# Bind with a RoleBinding (pod modes, per namespace) or ClusterRoleBinding (node mode).
+# Minimum permissions per `rtop k8s` mode (FR-013), as built. Copied into the README.
+# Bind the pod roles with a RoleBinding per namespace; the picker's cluster-wide lists and node
+# mode need a ClusterRoleBinding. Everything else rtop does is a read.
 ---
-# rtop --pod, exec only (with --no-debug-container); watch = restart/delete events
+# rtop k8s --pod NS/POD, exec only (with --no-debug-container).
+# watch: restarts, replacement and deletion of the pod.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -14,7 +16,8 @@ rules:
     resources: ["pods/exec"]
     verbs: ["create"]
 ---
-# rtop --pod with the debug-container fallback (default)
+# rtop k8s --pod with the debug-container fallback (the default): adds an ephemeral
+# container to pods whose image has no shell. It cannot be removed again.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -30,8 +33,23 @@ rules:
     resources: ["pods/ephemeralcontainers"]
     verbs: ["patch"]
 ---
-# rtop --node: read nodes and pods cluster-wide (attribution), run a helper pod.
-# The helper namespace must allow Pod Security level "privileged" (hostPID, hostPath).
+# rtop k8s (the picker). All optional: without namespaces/list the picker shows the context's
+# namespace and accepts a typed one; without nodes/list the nodes entry shows the error.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rtop-picker
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]  # "all namespaces"; per namespace, rtop-pod-exec already allows it
+---
+# rtop k8s --node NODE: read the node and the pods on it (attribution), and run a short-lived
+# hostPID helper pod. Bind the helper part (create/delete/exec) only in the helper namespace,
+# which must allow Pod Security level "privileged".
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -42,13 +60,16 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "create", "delete"]
+    verbs: ["list", "watch"]  # pods with spec.nodeName=NODE, cluster-wide
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rtop-node-helper  # in the helper namespace
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["watch"]  # node index watcher, helper readiness
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["list"]   # explain why a helper pod did not start

@@ -221,12 +221,18 @@ the lessons in the explain panel.
 
 ## Phase 7: Polish & cross-cutting
 
-- [ ] T057 [P] README.md: Kubernetes mode section (flags, modes, what gets added to the cluster and for how long), permissions from contracts/rbac.yaml, new sources-table rows
-- [ ] T058 [P] ROADMAP.md: tick the Kubernetes targets items
-- [ ] T059 Measure target CPU (quickstart.md §8). If it is above 10m, apply research R2's mitigations in src/kube/reader.sh and record the result in research.md.
-- [ ] T060 Run quickstart.md §7 failure table; every case shows a cause line, with no panic (SC-005)
-- [ ] T061 Run `make test lint` (macOS) and `make linux-test` (Docker); all green, and snapshot changes reviewed
-- [ ] T062 Check rtop idle CPU in pod mode (about 1% locally) with the existing flood harness approach
+- [X] T057 [P] README.md: Kubernetes mode section (flags, modes, what gets added to the cluster and for how long), permissions from contracts/rbac.yaml, new sources-table rows
+  - Done: a Kubernetes section with the modes, what each adds to the cluster and for how long, keys, dashboard, cost on the target and the permissions; contracts/rbac.yaml rewritten to match what rtop calls (picker role added, no `events`). Sources-table rows not added: the explain catalog carries them.
+- [X] T058 [P] ROADMAP.md: tick the Kubernetes targets items
+  - Done with each phase.
+- [X] T059 Measure target CPU (quickstart.md §8). If it is above 10m, apply research R2's mitigations in src/kube/reader.sh and record the result in research.md.
+  - Done on kind (single node, ~60 processes): a pod reader about 4m; the node helper 12m at a 2 s refresh, so node views now refresh every 3 s by default (10m measured). It grows with the number of processes (about 0.25 ms CPU per process per snapshot in busybox); the fd count is only ~10% of it, so it stays. Next step if needed: the static reader binary (R10).
+- [X] T060 Run quickstart.md §7 failure table; every case shows a cause line, with no panic (SC-005)
+  - Done: unknown context, missing pod, `docker pause` of the node (Phase 3), admission rejection and unknown node (Phase 4), and deleting the attached pod: rtop notes it and reattaches when the pod comes back. Fixed a spurious `restarted (0 restarts)` note on a newly created pod.
+- [X] T061 Run `make test lint` (macOS) and `make linux-test` (Docker); all green, and snapshot changes reviewed
+  - Done: macOS (lib, bin, UI, lean build) and `make linux-test` green; snapshot changes reviewed.
+- [X] T062 Check rtop idle CPU in pod mode (about 1% locally) with the existing flood harness approach
+  - Done: rtop itself uses 0.1% of one core in pod mode and 0.2% in node mode (30 s, release build).
 
 ---
 

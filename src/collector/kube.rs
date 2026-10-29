@@ -486,7 +486,8 @@ impl KubeCollector {
             let name = self.sessions[i].container.clone();
             let Some(now) = self.pod.containers.iter().find(|c| *c.name == *name) else { continue };
             let before = old.containers.iter().find(|c| *c.name == *name);
-            let restarted = before.is_some_and(|b| b.restarts != now.restarts || b.id != now.id);
+            // A container that had no ID yet (still being created) just started.
+            let restarted = before.is_some_and(|b| b.restarts != now.restarts || (b.id.is_some() && b.id != now.id));
             let s = &mut self.sessions[i];
             if let Some(shared) = &mut s.shared {
                 shared.clone_from(&ids);

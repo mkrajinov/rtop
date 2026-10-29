@@ -71,6 +71,9 @@ alternative is used.
 - **CPU on target** (SC-003, **verify on kind**): target ≤ 1% of one core at a 2 s tick.
   - Mitigations, in order: drop the fd count from `snap`; raise the tick.
   - Last resort: a static reader binary (R10).
+  - **Measured (T059)**: about 4m for a pod container's reader and 12m for a ~60-process node
+    at 2 s; about 0.25 ms CPU per process per snapshot. The fd count is ~10% of that, so node
+    views get a 3 s default instead (10m measured).
 - **Alternatives considered**:
   - One exec per file: hundreds of execs per tick.
   - Copying a binary into the app container: writes into the workload and needs `tar`.

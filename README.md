@@ -27,9 +27,7 @@ rtop k8s --pod demo/api-7c9f            # straight to one pod; Esc goes back to 
 rtop k8s --node worker-3 --helper-namespace debug   # every process on a node (read-only)
 ```
 
-`--node` creates a short-lived pod with `hostPID` on that node (labelled
-`app.kubernetes.io/managed-by=rtop`, deleted on exit, at most an hour old). Its namespace must
-allow that under Pod Security (`privileged`).
+See [Kubernetes](#kubernetes) for what each mode adds to the cluster and the permissions it needs.
 
 ## Keys
 
@@ -120,6 +118,41 @@ accent = "violet"
 
 Each lab runs as `rtop __lab-worker <name>`, a re-exec of rtop in its own process group. rtop kills the
 whole group when you quit, and workers exit on their own after 10 minutes.
+
+## Kubernetes
+
+`rtop k8s` reads Linux `/proc` inside a cluster through the API server only (no SSH, nothing
+installed on nodes). The header always names the context, highlighted when it came from the
+kubeconfig rather than `--context`.
+
+| Mode | How rtop reads | What it adds to the cluster |
+|---|---|---|
+| picker (`rtop k8s`) | lists namespaces, pods and nodes (from the API server's cache) | nothing |
+| pod (`--pod NS/POD`, or Enter in the picker) | one `sh` reader per container over `pods/exec` | nothing, unless an image has no shell: then an ephemeral `busybox` debug container that shares that container's PID namespace. It cannot be removed and stays in the pod spec (terminated after an hour) until the pod is deleted. `--no-debug-container` turns this off. |
+| node (`--node NODE`, or `⎈ nodes` + `y` in the picker) | one reader in a helper pod with `hostPID` | a pod `rtop-node-<node>-<id>` in `--helper-namespace` (root, only `SYS_PTRACE`, 1 CPU / 64Mi limit, labelled `app.kubernetes.io/managed-by=rtop`). Deleted on exit, Ctrl-C, SIGTERM and Esc; `activeDeadlineSeconds: 3600` if rtop is killed hard. If deletion fails rtop prints the `kubectl delete` command. |
+
+- **Read-only.** Signals are off in pod mode unless `--allow-actions`; node mode never sends them
+  (root in a hostPID pod could signal the kubelet).
+- **Keys.** `Esc` goes back to the picker, `C` narrows to one container, `L` steps through the
+  Kubernetes lessons in the explain panel (why `/proc/meminfo` shows the node, limits,
+  throttling, OOM kills, …).
+- **Dashboard.** In pod mode the containers card reads each container's cgroup: CPU against
+  `cpu.max` with throttled periods, memory against `memory.max`, OOM kills, restarts and why the
+  container last ended. The memory and CPU cards are the node's.
+- **Cost on the target.** Measured on kind: about 4m CPU per container reader and 12m for a node
+  of 60 processes at a 2 s refresh, growing with the number of processes; node views refresh
+  every 3 s by default.
+
+Permissions (full manifests: [specs/001-k8s-targets/contracts/rbac.yaml](specs/001-k8s-targets/contracts/rbac.yaml)):
+
+| Mode | Verbs |
+|---|---|
+| pod | `get`, `list`, `watch` pods and `create` `pods/exec` in the namespace; `patch` `pods/ephemeralcontainers` for the debug-container fallback |
+| picker | `list` namespaces, nodes and pods cluster-wide (all optional) |
+| node | `get`, `list` nodes and `list`, `watch` pods cluster-wide; `get`, `list`, `watch`, `create`, `delete` pods and `create` `pods/exec` in the helper namespace, which must allow Pod Security `privileged` |
+
+rtop uses the kubeconfig as kubectl does (exec credential plugins included) and never stores or
+prints credentials.
 
 ## Layout
 

@@ -13,7 +13,7 @@ use rtop::{collector, labs, ui};
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
-    /// Refresh interval in seconds [default: 1.5, or 2 for rtop k8s].
+    /// Refresh interval in seconds [default: 1.5; rtop k8s: 2 for a pod, 3 for a node].
     #[arg(short, long, global = true)]
     delay: Option<f32>,
     /// Colour theme (overrides the config file).
@@ -69,6 +69,10 @@ struct K8sArgs {
     /// Allow sending signals to processes in the pod (read-only otherwise).
     #[arg(long)]
     allow_actions: bool,
+    /// Refresh interval of a node view: 3 s unless -d is given, since the
+    /// reader reads every process of the node each time.
+    #[arg(skip)]
+    node_tick: Duration,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -82,7 +86,10 @@ fn main() -> anyhow::Result<()> {
 
     let mut lab = None;
     match cli.command.take() {
-        Some(Cmd::K8s(args)) => return k8s(args, tick),
+        Some(Cmd::K8s(mut args)) => {
+            args.node_tick = Duration::from_secs_f32(cli.delay.unwrap_or(3.0).max(0.2));
+            return k8s(args, tick);
+        }
         Some(Cmd::LabWorker { name }) => return labs::worker::run(&name),
         Some(Cmd::Inspect { pid }) => return inspect(pid),
         Some(Cmd::Lab { name: None }) => {
@@ -203,7 +210,7 @@ fn k8s(args: K8sArgs, tick: Duration) -> anyhow::Result<()> {
         (Some(pod), _) => Some(KubeCollector::connect(pod_options(&args, &picker, picker.ns.clone(), pod, tick))?),
         (None, Some(node)) => {
             eprintln!("starting a helper pod in {} / namespace {} on node {node} …", picker.context, picker.helper_ns);
-            let opened = KubeCollector::connect_node(node_options(&args, &picker, node.clone(), tick));
+            let opened = KubeCollector::connect_node(node_options(&args, &picker, node.clone()));
             print_leftovers();
             Some(opened?)
         }
@@ -229,18 +236,13 @@ fn print_leftovers() {
 
 /// The node view, with its helper pod in `picker.helper_ns`.
 #[cfg(feature = "kube")]
-fn node_options(
-    args: &K8sArgs,
-    picker: &rtop::picker::Picker,
-    node: String,
-    tick: Duration,
-) -> collector::kube::NodeOptions {
+fn node_options(args: &K8sArgs, picker: &rtop::picker::Picker, node: String) -> collector::kube::NodeOptions {
     collector::kube::NodeOptions {
         context: Some(picker.context.clone()),
         implicit_context: picker.implicit_context,
         node,
         helper_namespace: Some(picker.helper_ns.clone()),
-        tick,
+        tick: args.node_tick,
         image: args.debug_image.clone(),
     }
 }
@@ -284,11 +286,11 @@ fn k8s_loop(
             },
         };
         let mut app = App::new(Box::new(collector));
-        app.tick = tick;
+        let node = matches!(app.collector.target(), Some(rtop::model::Target::Node { .. }));
+        app.tick = if node { args.node_tick } else { tick };
         app.container = container.take();
         // Node mode stays read-only: root in a hostPID pod could signal
         // the kubelet.
-        let node = matches!(app.collector.target(), Some(rtop::model::Target::Node { .. }));
         app.allow_actions = args.allow_actions && !node;
         app.can_go_back = true;
         run(terminal, &mut app)?;
@@ -407,7 +409,7 @@ fn pick(
             }
             Action::OpenNode { node } => {
                 picker.connecting = Some(format!("node {node} (creating the helper pod)"));
-                let opts = node_options(args, picker, node, tick);
+                let opts = node_options(args, picker, node);
                 opening = Some(Opening::start(true, move || KubeCollector::connect_node(opts)));
             }
             Action::None => {}
