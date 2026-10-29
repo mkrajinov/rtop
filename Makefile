@@ -6,7 +6,7 @@ DOCKER_RUN := docker run --rm --pid=host --privileged \
 	-v $(CURDIR):/src -v rtop-target:/target -v rtop-cargo:/usr/local/cargo/registry \
 	-w /src $(IMAGE)
 
-.PHONY: run test lint image linux-shell linux-test linux-run linux-up linux-exec linux-down kube-up kube-e2e kube-down
+.PHONY: run install test lint image linux-shell linux-test linux-run linux-up linux-exec linux-down kube-up kube-e2e kube-down
 
 run:
 	cargo run --release
@@ -64,3 +64,13 @@ kube-e2e: kube-up
 
 kube-down:
 	kind delete cluster --name rtop
+
+# `rtop` on the PATH: a symlink to the release build, so every
+# `cargo build --release` updates the command too.
+BIN_DIR ?= $(HOME)/.local/bin
+
+install:
+	cargo build --release
+	mkdir -p $(BIN_DIR)
+	ln -sf $(CURDIR)/target/release/rtop $(BIN_DIR)/rtop
+	@echo "rtop -> $(CURDIR)/target/release/rtop"
