@@ -58,7 +58,9 @@ pub fn manifest(node: &str, image: &str, deadline_secs: u32, session: &str) -> P
                 },
                 "resources": {
                     "requests": {"cpu": "10m", "memory": "16Mi"},
-                    "limits": {"cpu": "200m", "memory": "64Mi"},
+                    // The reader reads every process each refresh: with a few
+                    // hundred, 200m made one snapshot take over a second.
+                    "limits": {"cpu": "1", "memory": "64Mi"},
                 },
             }],
         },

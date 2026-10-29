@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail};
@@ -51,6 +52,10 @@ pub struct NodeOptions {
     pub image: String,
 }
 
+/// Set by `main`'s SIGINT/SIGTERM handler: start-up waits give up, and
+/// whatever they created is deleted.
+pub static CANCEL: AtomicBool = AtomicBool::new(false);
+
 /// Helper pods rtop could not delete on exit, as the commands that delete
 /// them. `main` prints these after the terminal is restored.
 pub static LEFTOVER: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -64,8 +69,9 @@ struct NodeMode {
     pods: usize,
     image: String,
     deadline: u32,
-    /// HelperCreate request id while a replacement helper is on its way.
-    replacing: Option<u64>,
+    /// HelperCreate request id and pod name while a replacement helper is
+    /// on its way.
+    replacing: Option<(u64, String)>,
 }
 
 pub struct KubeCollector {
@@ -154,7 +160,7 @@ impl KubeCollector {
         let id = k.send(Request::HelperGc { ns: ns.clone() });
         let _ = wait(&k, id);
         let deadline = helper_deadline();
-        let name = create_helper(&mut k, &info.name, &ns, &opts.image, deadline)?;
+        let name = create_helper(&mut k, &context, &info.name, &ns, &opts.image, deadline)?;
         k.send(Request::WatchPod { ns: ns.clone(), name: name.clone() });
         k.send(Request::WatchNodePods { node: info.name.clone() });
         let pod = PodInfo { ns: ns.clone(), name, phase: "Running".into(), ..Default::default() };
@@ -235,14 +241,16 @@ impl KubeCollector {
         let old = self.pod.name.clone();
         // A finished helper stays as Completed until deleted.
         self.k.send(Request::HelperDelete { ns: self.pod.ns.clone(), name: old.clone() });
+        let session = session_id();
+        let name = crate::kube::helper::name(&n.info.name, &session);
         let id = self.k.send(Request::HelperCreate {
             node: n.info.name.clone(),
             ns: self.pod.ns.clone(),
             image: n.image.clone(),
             deadline_secs: n.deadline,
-            session: session_id(),
+            session,
         });
-        n.replacing = Some(id);
+        n.replacing = Some((id, name));
         self.close_all();
         for s in &mut self.sessions {
             s.stop(&format!("helper pod {old} {why}; starting a new one"));
@@ -388,7 +396,7 @@ impl KubeCollector {
                     self.sessions[i].on_open(reply);
                 } else if let Some(i) = self.debugging.remove(&id) {
                     self.debug_ready(i, reply);
-                } else if self.node.as_ref().is_some_and(|n| n.replacing == Some(id)) {
+                } else if self.node.as_ref().is_some_and(|n| n.replacing.as_ref().is_some_and(|r| r.0 == id)) {
                     self.helper_ready(reply);
                 }
             }
@@ -402,14 +410,23 @@ impl KubeCollector {
                     s.on_closed(exit_code, error);
                 }
             }
+            // The helper reached its deadline: replace it.
             Incoming::Event(Event::Pod(p)) if self.node.is_some() => {
-                if p.name == self.pod.name && p.phase != "Running" {
+                if p.name == self.pod.name && matches!(p.phase.as_str(), "Succeeded" | "Failed") {
                     self.helper_gone(&format!("is {}", p.phase));
                 }
             }
+            // Someone else deleted it (an operator, a policy controller):
+            // do not put it back.
             Incoming::Event(Event::PodDeleted { name, .. }) if self.node.is_some() => {
-                if name == self.pod.name {
-                    self.helper_gone("was deleted");
+                let replacing = self.node.as_ref().is_some_and(|n| n.replacing.is_some());
+                if name == self.pod.name && !replacing {
+                    self.close_all();
+                    for s in &mut self.sessions {
+                        s.stop(&format!(
+                            "helper pod {name} was deleted outside rtop; Esc and open the node again to start a new one"
+                        ));
+                    }
                 }
             }
             Incoming::Event(Event::Pod(p)) => self.pod_changed(p),
@@ -528,22 +545,40 @@ fn session_id() -> String {
     format!("{:08x}", (n.as_nanos() as u64 ^ (std::process::id() as u64).wrapping_mul(0x9e37_79b9)) as u32)
 }
 
-fn create_helper(k: &mut KubeHandle, node: &str, ns: &str, image: &str, deadline: u32) -> anyhow::Result<String> {
+/// Create the helper and wait until it runs. The name is known before
+/// the create is sent, so whatever goes wrong (a timeout, Ctrl-C during an
+/// image pull) the pod is deleted rather than left on the node.
+fn create_helper(
+    k: &mut KubeHandle,
+    context: &str,
+    node: &str,
+    ns: &str,
+    image: &str,
+    deadline: u32,
+) -> anyhow::Result<String> {
+    let session = session_id();
+    let name = crate::kube::helper::name(node, &session);
     let id = k.send(Request::HelperCreate {
         node: node.into(),
         ns: ns.into(),
         image: image.into(),
         deadline_secs: deadline,
-        session: session_id(),
+        session,
     });
-    match wait_for(k, id, CREATE_TIMEOUT) {
-        Ok(Reply::Helper { name }) => Ok(name),
-        Ok(other) => bail!("unexpected reply {other:?}"),
+    let result = wait_cancellable(k, id, CREATE_TIMEOUT);
+    match result {
+        Ok(Reply::Helper { name }) => return Ok(name),
+        // Refused at creation: there is nothing to delete.
         Err(e) if e.downcast_ref::<KubeError>().is_some_and(|e| e.code == ErrorCode::Admission) => {
             bail!(
                 "helper pod rejected by admission in {ns}: {e} (pick a namespace that allows hostPID with --helper-namespace)"
             )
         }
+        _ => {}
+    }
+    delete_helper(k, context, ns, &name);
+    match result {
+        Ok(other) => bail!("unexpected reply {other:?}"),
         Err(e) => bail!("helper pod in {ns}: {e}"),
     }
 }
@@ -582,38 +617,57 @@ fn quantity_bytes(q: &str) -> Option<u64> {
 }
 
 impl Drop for KubeCollector {
-    /// Delete the helper pod. If that fails, the command that deletes it
-    /// goes to `LEFTOVER` for `main` to print.
+    /// Delete the helper pod, and the replacement on its way if there is
+    /// one.
     fn drop(&mut self) {
-        if self.node.is_none() {
-            return;
+        let Some(n) = &self.node else { return };
+        let context = match &self.target {
+            Target::Node { context, .. } | Target::Pod { context, .. } => context.clone(),
+        };
+        let pending = n.replacing.as_ref().map(|r| r.1.clone());
+        let ns = self.pod.ns.clone();
+        for name in std::iter::once(self.pod.name.clone()).chain(pending) {
+            delete_helper(&mut self.k, &context, &ns, &name);
         }
-        let (ns, name) = (self.pod.ns.clone(), self.pod.name.clone());
-        let id = self.k.send(Request::HelperDelete { ns: ns.clone(), name: name.clone() });
-        if !matches!(wait_for(&self.k, id, Duration::from_secs(3)), Ok(Reply::Deleted(_))) {
-            let context = match &self.target {
-                Target::Node { context, .. } | Target::Pod { context, .. } => context.clone(),
-            };
-            if let Ok(mut l) = LEFTOVER.lock() {
-                l.push(format!("kubectl --context {context} -n {ns} delete pod {name}"));
-            }
-        }
+    }
+}
+
+/// Delete a helper pod (already gone counts as deleted). If that fails,
+/// the command that deletes it goes to `LEFTOVER` for `main` to print.
+fn delete_helper(k: &mut KubeHandle, context: &str, ns: &str, name: &str) {
+    let id = k.send(Request::HelperDelete { ns: ns.into(), name: name.into() });
+    if !matches!(wait_for(k, id, Duration::from_secs(3)), Ok(Reply::Deleted(_)))
+        && let Ok(mut l) = LEFTOVER.lock()
+    {
+        l.push(format!("kubectl --context {context} -n {ns} delete pod {name}"));
     }
 }
 
 /// Wait for the reply to `id` during start-up (before the TUI runs).
 fn wait(k: &KubeHandle, id: u64) -> anyhow::Result<Reply> {
-    wait_for(k, id, CONNECT_TIMEOUT)
+    wait_cancellable(k, id, CONNECT_TIMEOUT)
 }
 
+/// Like [`wait_for`], but SIGINT/SIGTERM ([`CANCEL`]) ends it early.
+fn wait_cancellable(k: &KubeHandle, id: u64, timeout: Duration) -> anyhow::Result<Reply> {
+    wait_until(k, id, timeout, true)
+}
+
+/// Wait for the reply to `id`; cleanup uses this, so signals do not cut it short.
 fn wait_for(k: &KubeHandle, id: u64, timeout: Duration) -> anyhow::Result<Reply> {
+    wait_until(k, id, timeout, false)
+}
+
+fn wait_until(k: &KubeHandle, id: u64, timeout: Duration, cancellable: bool) -> anyhow::Result<Reply> {
     let deadline = Instant::now() + timeout;
     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-        match k.recv_timeout(left) {
+        if cancellable && CANCEL.load(Ordering::Relaxed) {
+            bail!("interrupted");
+        }
+        match k.recv_timeout(left.min(Duration::from_millis(100))) {
             Some(Incoming::Reply(got, Reply::Err(e))) if got == id => return Err(e.into()),
             Some(Incoming::Reply(got, r)) if got == id => return Ok(r),
-            Some(_) => {}
-            None => break,
+            _ => {}
         }
     }
     bail!("no answer from the API server in {} s", timeout.as_secs())
@@ -833,16 +887,10 @@ mod tests {
         assert!(!det.limits.is_empty() && !det.regions.is_empty());
     }
 
-    /// T036/T044: a reader in a hostPID helper on kind. Processes of pods
-    /// are attributed through the node index, the rest is `host`.
-    #[test]
-    fn node_capture_attributes_processes() {
-        let path = format!("{}/tests/fixtures/kube/pods-on-node.json", env!("CARGO_MANIFEST_DIR"));
-        let list: k8s_openapi::List<k8s_openapi::api::core::v1::Pod> =
-            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-        let idx = crate::kube::convert::node_index(&list.items);
-        let mut c = KubeCollector {
-            k: crate::kube::client::tests::mocked().0,
+    /// A node-mode collector reading through helper `rtop-demo/rtop-probe`.
+    fn node_collector(k: KubeHandle) -> KubeCollector {
+        KubeCollector {
+            k,
             target: Target::Node {
                 context: "kind-rtop".into(),
                 node: "rtop-control-plane".into(),
@@ -866,7 +914,38 @@ mod tests {
                 deadline: 3600,
                 replacing: None,
             }),
-        };
+        }
+    }
+
+    /// A helper that cannot be deleted is reported with the command that
+    /// deletes it, for `main` to print after the TUI closes.
+    #[test]
+    fn undeletable_helper_is_reported() {
+        let (k, mut api) = crate::kube::client::tests::mocked();
+        let mut c = node_collector(k);
+        c.pod.name = "rtop-probe-403".into();
+        let answer = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let status = serde_json::json!({"kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 403,
+                "reason": "Forbidden", "message": "pods \"rtop-probe\" is forbidden: User \"dev\" cannot delete resource \"pods\""});
+            let path = rt.block_on(crate::kube::client::tests::answer(&mut api, 403, status));
+            assert_eq!(path, "/api/v1/namespaces/rtop-demo/pods/rtop-probe-403");
+        });
+        drop(c);
+        answer.join().unwrap();
+        let left = LEFTOVER.lock().unwrap().clone();
+        assert!(left.iter().any(|l| l.ends_with("-n rtop-demo delete pod rtop-probe-403")), "{left:?}");
+    }
+
+    /// T036/T044: a reader in a hostPID helper on kind. Processes of pods
+    /// are attributed through the node index, the rest is `host`.
+    #[test]
+    fn node_capture_attributes_processes() {
+        let path = format!("{}/tests/fixtures/kube/pods-on-node.json", env!("CARGO_MANIFEST_DIR"));
+        let list: k8s_openapi::List<k8s_openapi::api::core::v1::Pod> =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let idx = crate::kube::convert::node_index(&list.items);
+        let mut c = node_collector(crate::kube::client::tests::mocked().0);
         c.plan_node_session();
         c.node_index(idx);
         assert!(matches!(&c.target, Target::Node { detail, .. } if detail.ends_with("13 pods")));
@@ -896,6 +975,8 @@ mod tests {
         }
         let snap = c.snapshot();
         assert!(snap.system.net.unwrap().source.contains("/proc/1/net/dev of the node"));
+        // Nothing to delete: there is no API server behind this one.
+        c.node = None;
     }
 
     /// T020: two containers each have a PID 1 and a PID 7; merged, they stay

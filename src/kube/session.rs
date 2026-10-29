@@ -370,7 +370,9 @@ impl Session {
         let live: std::collections::HashSet<_> = out.iter().map(|p| (p.pid, p.start_time)).collect();
         self.cmdlines.retain(|key, _| live.contains(key));
         if !missing.is_empty() && self.cmd_sent.is_none() {
-            missing.truncate(200);
+            // One request for a whole node (about 0.5 ms per process in
+            // busybox), so new rows are labelled within a refresh or two.
+            missing.truncate(2000);
             let pids: Vec<String> = missing.iter().map(|(p, _)| p.to_string()).collect();
             if let Some(seq) = self.write(k, "cmd", &pids.join(" ")) {
                 self.cmd_sent = Some((seq, missing));

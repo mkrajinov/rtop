@@ -125,6 +125,9 @@ static QUIT: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_quit_signal(_: libc::c_int) {
     QUIT.store(true, Ordering::Relaxed);
+    // Before the TUI: stop waiting for the cluster and clean up.
+    #[cfg(feature = "kube")]
+    collector::kube::CANCEL.store(true, Ordering::Relaxed);
 }
 
 fn install_quit_signals() -> anyhow::Result<()> {
@@ -182,6 +185,8 @@ fn k8s(args: K8sArgs, tick: Duration) -> anyhow::Result<()> {
     use collector::kube::KubeCollector;
     use rtop::picker::Picker;
 
+    // Ctrl-C while a helper pod is being created must still delete it.
+    install_quit_signals()?;
     eprintln!("connecting to {} …", args.context.as_deref().unwrap_or("the current context"));
     let (pod_ns, pod) = match args.pod.as_deref().map(|p| p.split_once('/')) {
         Some(Some((ns, name))) => (Some(ns.to_string()), Some(name.to_string())),
@@ -192,28 +197,37 @@ fn k8s(args: K8sArgs, tick: Duration) -> anyhow::Result<()> {
     let first = match (pod, &args.node) {
         (Some(pod), _) => Some(KubeCollector::connect(pod_options(&args, &picker, picker.ns.clone(), pod, tick))?),
         (None, Some(node)) => {
-            eprintln!("starting a helper pod on node {node} …");
-            Some(KubeCollector::connect_node(collector::kube::NodeOptions {
+            let ns = args.helper_namespace.clone().unwrap_or_else(|| picker.ns.clone());
+            eprintln!("starting a helper pod in {} / namespace {ns} on node {node} …", picker.context);
+            let opened = KubeCollector::connect_node(collector::kube::NodeOptions {
                 context: Some(picker.context.clone()),
                 implicit_context: picker.implicit_context,
                 node: node.clone(),
-                helper_namespace: args.helper_namespace.clone().or_else(|| args.namespace.clone()),
+                helper_namespace: Some(ns),
                 tick,
                 image: args.debug_image.clone(),
-            })?)
+            });
+            print_leftovers();
+            Some(opened?)
         }
         (None, None) => None,
     };
 
-    install_quit_signals()?;
     let mut terminal = ratatui::init();
     let result = k8s_loop(&mut terminal, &mut picker, first, &args, tick);
     ratatui::restore();
-    // Helper pods that could not be deleted (the views are gone by now).
-    for cmd in collector::kube::LEFTOVER.lock().map(|l| l.clone()).unwrap_or_default() {
+    // The views are gone by now, and with them their helper pods.
+    print_leftovers();
+    Ok(result?)
+}
+
+/// Helper pods rtop could not delete, with the command that does.
+#[cfg(feature = "kube")]
+fn print_leftovers() {
+    let cmds = std::mem::take(&mut *collector::kube::LEFTOVER.lock().unwrap_or_else(|e| e.into_inner()));
+    for cmd in cmds {
         eprintln!("rtop could not delete its helper pod; remove it with: {cmd}");
     }
-    Ok(result?)
 }
 
 /// Both pod views use the context the picker resolved, so a kubeconfig

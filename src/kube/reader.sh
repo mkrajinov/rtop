@@ -86,9 +86,19 @@ rtop_reader() {
 		seq=$1
 		shift
 		# argv, and the cgroup that says which container the process is in.
+		# A node has hundreds of processes: the cgroup is read with the
+		# builtin read (no fork); argv may contain NULs, so it takes cat.
 		for p in "$@"; do
 			_file /proc/$p/cmdline
-			_file /proc/$p/cgroup
+			_f /proc/$p/cgroup
+			rc=1
+			{
+				while IFS= read -r l; do
+					printf '%s\n' "$l"
+					rc=0
+				done <"/proc/$p/cgroup"
+			} 2>/dev/null
+			_e $rc
 		done
 		_d "$seq"
 	}

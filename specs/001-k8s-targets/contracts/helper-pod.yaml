@@ -31,7 +31,7 @@ spec:
           add: ["SYS_PTRACE"]
       resources:
         requests: { cpu: 10m, memory: 16Mi }
-        limits: { cpu: 200m, memory: 64Mi }
+        limits: { cpu: "1", memory: 64Mi }   # 200m made a snapshot of ~900 processes take 1.2 s
 # No hostPath: the reader takes the host's /etc/passwd from /proc/1/root and its network
 # counters from /proc/1/net. cgroup files are not read in node mode yet (Story 4); the
 # paths in /proc/<pid>/cgroup are relative to the helper's cgroup namespace.

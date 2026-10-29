@@ -156,7 +156,7 @@ labelled, self-expiring helper pod.
   - delete finished helpers found by label at start;
   - `RTOP_HELPER_DEADLINE` override;
   - `--helper-namespace` flag.
-  - Done: create, wait for Running (image pull and stuck reasons reported), delete with grace 0, GC of finished helpers only. Deletion runs from `KubeCollector::drop`, so normal exit, Ctrl-C/SIGTERM and unwinding panics all delete; failures are printed after the TUI closes. When the helper ends (deadline, deleted), rtop deletes it and creates a new one. No event listing on failure: the admission message from the create call is shown instead.
+  - Done: create, wait for Running (image pull and stuck reasons reported), delete with grace 0, GC of finished helpers only. Deletion runs from `KubeCollector::drop`, so normal exit, Ctrl-C/SIGTERM and unwinding panics all delete; failures are printed after the TUI closes. When the helper reaches its deadline rtop deletes it and creates a new one; one deleted by someone else is not recreated. The helper's name is fixed before the create is sent, so a timeout or Ctrl-C during start-up (an image pull) deletes it too; SIGINT/SIGTERM are handled from the start. No event listing on failure: the admission message from the create call is shown instead.
 - [X] T041 [US2] NodeIndex:
   - in src/kube/client.rs, `WatchNodePods` runs a watcher on pods with field selector `spec.nodeName=<node>`, kept in a map and sent as `Event::NodeIndex` debounced to 1 s, through the pure `convert::node_index`;
   - in src/collector/kube.rs, send `cg` requests for new PIDs and set `origin.pod`/`origin.container`.
@@ -166,7 +166,7 @@ labelled, self-expiring helper pod.
 - [X] T043 [US2] `--node` flag in src/main.rs and the POD column in src/ui/table.rs; `/` filter matches the pod name
   - Done: `rtop k8s --node NODE [--helper-namespace NS]`; POD column sized to the longest name; the filter matches the pod.
 - [X] T044 [US2] Validate quickstart.md §5 on kind, including no leftover helper after quit and expiry with `RTOP_HELPER_DEADLINE=60`; capture snap-node.bin
-  - Done: on kind, 53 processes in one snapshot (about 30 ms in the reader); no helper left after `q`, SIGTERM or Esc back to the picker; `RTOP_HELPER_DEADLINE=40` replaced the helper and removed the old one; a `baseline` namespace gives the admission message. Captured as `kind-node.bin` instead of `snap-node.bin`.
+  - Done: on kind, 53 processes in one snapshot (about 30 ms in the reader). With 850 processes, a snapshot took 1.2 s and the argv/cgroup lookups 4 s under a 200m CPU limit, so labels appeared after ~16 s: the limit is now 1 CPU, `cmd` asks for up to 2000 PIDs at once and reads cgroups with builtins, and every row is labelled 6 s after start; no helper left after `q`, SIGTERM or Esc back to the picker; `RTOP_HELPER_DEADLINE=40` replaced the helper and removed the old one; a `baseline` namespace gives the admission message. Captured as `kind-node.bin` instead of `snap-node.bin`.
 
 **Checkpoint**: Stories 1 and 2 both work independently.
 
