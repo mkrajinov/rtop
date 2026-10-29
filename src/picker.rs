@@ -33,8 +33,10 @@ enum Pending {
     Pods,
 }
 
-/// Pod lists are fetched again this often while the picker is shown.
+/// Pod lists are fetched again this often while the picker is shown;
+/// every pod of a large cluster only rarely (`r` lists at once).
 const RELIST: Duration = Duration::from_secs(3);
+const RELIST_ALL: Duration = Duration::from_secs(30);
 
 pub struct Picker {
     k: Option<KubeHandle>,
@@ -158,7 +160,8 @@ impl Picker {
             }
         }
         self.now = crate::fmt::now_unix();
-        if self.connecting.is_none() && self.listed.is_none_or(|t| t.elapsed() >= RELIST) {
+        let every = if self.ns.is_empty() { RELIST_ALL } else { RELIST };
+        if self.connecting.is_none() && self.listed.is_none_or(|t| t.elapsed() >= every) {
             self.list_pods();
         }
     }

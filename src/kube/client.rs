@@ -122,15 +122,18 @@ impl State {
 
     async fn list_namespaces(&self) -> Result<Reply, KubeError> {
         let api: Api<Namespace> = Api::all(self.client()?.clone());
-        let list = api.list(&ListParams::default()).await.map_err(map_err)?;
+        let list = api.list(&ListParams::default().match_any()).await.map_err(map_err)?;
         let mut names: Vec<String> = list.items.into_iter().filter_map(|n| n.metadata.name).collect();
         names.sort();
         Ok(Reply::Namespaces(names))
     }
 
+    /// Picker lists are served from the API server's watch cache
+    /// (`resourceVersion=0`), so polling them never reaches etcd. The data
+    /// may be a moment old, which a picker can live with.
     async fn list_pods(&self, ns: &str) -> Result<Reply, KubeError> {
         let api: Api<Pod> = if ns.is_empty() { Api::all(self.client()?.clone()) } else { self.pods(ns)? };
-        let list = api.list(&ListParams::default()).await.map_err(map_err)?;
+        let list = api.list(&ListParams::default().match_any()).await.map_err(map_err)?;
         let mut pods: Vec<_> = list.items.iter().map(convert::pod_summary).collect();
         pods.sort_by(|a, b| (&a.ns, &a.name).cmp(&(&b.ns, &b.name)));
         Ok(Reply::Pods(pods))

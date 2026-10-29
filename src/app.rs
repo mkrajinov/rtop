@@ -682,9 +682,10 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Esc => {
-                if !self.filter.is_empty() || self.scope != Scope::All {
+                if !self.filter.is_empty() || self.scope != Scope::All || self.container.is_some() {
                     self.filter.clear();
                     self.scope = Scope::All;
+                    self.container = None;
                     self.rebuild();
                 } else if self.can_go_back {
                     self.back = true;
