@@ -94,3 +94,35 @@ fn theme_picker_previews_and_esc_restores() {
     press(&mut app, KeyCode::Esc);
     assert_eq!(rtop::ui::theme::current(), before);
 }
+
+/// Two containers of a pod each have a PID 1 and a PID 7. The tree must keep
+/// them apart and hang each child under the parent from its own namespace.
+#[test]
+fn same_pid_in_two_namespaces_stays_apart() {
+    use rtop::collector::fixture::process;
+    let mut c = FixtureCollector::default();
+    c.snapshot.processes.clear();
+    for (space, root, child) in [(1, "app", "worker"), (2, "sidecar", "shipper")] {
+        let mut p = process(1, 0, root);
+        p.space = space;
+        let mut k = process(7, 1, child);
+        k.space = space;
+        c.snapshot.processes.extend([p, k]);
+    }
+    let mut app = App::new(Box::new(c));
+    app.refresh();
+    press(&mut app, KeyCode::Char('t'));
+    assert_eq!(app.rows.len(), 4);
+    let names: Vec<_> = app
+        .rows
+        .iter()
+        .map(|r| {
+            let p = &app.snapshot.processes[r.idx];
+            format!("{}{}@{}", r.prefix, p.name, p.space)
+        })
+        .collect();
+    for (root, child, space) in [("app", "worker", 1), ("sidecar", "shipper", 2)] {
+        let i = names.iter().position(|n| n == &format!("{root}@{space}")).unwrap();
+        assert!(names[i + 1].ends_with(&format!("{child}@{space}")), "{names:?}");
+    }
+}

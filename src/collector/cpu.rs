@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::model::{CpuTicks, IoCounters, Pid, Process};
+use crate::model::{CpuTicks, IoCounters, ProcId, Process};
 
 /// 100% means one full core. A process with 4 busy threads can show 400%.
 pub fn percent(prev_ns: u64, now_ns: u64, elapsed: Duration) -> f32 {
@@ -19,8 +19,8 @@ pub fn percent(prev_ns: u64, now_ns: u64, elapsed: Duration) -> f32 {
 
 #[derive(Default)]
 pub struct CpuTracker {
-    /// Keyed by (pid, start time) so a recycled PID never inherits old totals.
-    prev: HashMap<(Pid, u64), u64>,
+    /// Keyed by (process, start time) so a recycled PID never inherits old totals.
+    prev: HashMap<(ProcId, u64), u64>,
     last: Option<Instant>,
 }
 
@@ -29,7 +29,7 @@ impl CpuTracker {
         let elapsed = self.last.map(|t| now.duration_since(t));
         let mut next = HashMap::with_capacity(procs.len());
         for p in procs.iter_mut() {
-            let key = (p.pid, p.start_time);
+            let key = (p.id(), p.start_time);
             p.cpu_percent = match (elapsed, self.prev.get(&key)) {
                 (Some(e), Some(&prev)) => percent(prev, p.cpu_time_ns, e),
                 _ => 0.0,

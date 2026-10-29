@@ -135,7 +135,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
 
 fn inspect(pid: i32) -> anyhow::Result<()> {
     let mut c = collector::native();
-    let d = c.details(pid)?;
+    let d = c.details(rtop::model::ProcId::local(pid))?;
     println!("PID {pid} · {} ({})", d.name, c.platform());
     for n in &d.notes {
         println!("! {n}");

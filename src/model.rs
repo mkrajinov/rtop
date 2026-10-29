@@ -6,6 +6,46 @@
 
 pub type Pid = i32;
 
+/// Which process a row is. A PID is only unique inside one PID namespace: two
+/// containers of a pod each have their own PID 1. `space` numbers the
+/// namespaces rtop reads from; it is 0 locally, on a node, and in a pod whose
+/// containers share one namespace.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ProcId {
+    pub space: u16,
+    pub pid: Pid,
+}
+
+impl ProcId {
+    pub const fn local(pid: Pid) -> Self {
+        ProcId { space: 0, pid }
+    }
+}
+
+/// The PID as the kernel inside that namespace knows it; the container is
+/// shown in its own column.
+impl std::fmt::Display for ProcId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.pid.fmt(f)
+    }
+}
+
+/// Where a process lives when rtop reads a Kubernetes target.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Origin {
+    /// `namespace/name`; only set on a node, where processes of many pods mix.
+    pub pod: Option<std::sync::Arc<str>>,
+    /// Container name, `host` for node processes outside any pod, or `pause`.
+    pub container: std::sync::Arc<str>,
+}
+
+/// What rtop is attached to; `None` everywhere in local mode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Pod { context: String, namespace: String, pod: String, node: Option<String>, container: Option<String> },
+    Node { context: String, node: String },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ProcState {
     Running,
@@ -68,6 +108,8 @@ impl ProcState {
 /// One row in the process table. Cheap to collect for every process each tick.
 #[derive(Clone, Debug)]
 pub struct Process {
+    /// PID namespace this row was read from; see [`ProcId`].
+    pub space: u16,
     pub pid: Pid,
     pub ppid: Pid,
     pub pgid: Pid,
@@ -90,6 +132,17 @@ pub struct Process {
     pub start_time: u64,
     /// The kernel refused to tell us some details (other user's process).
     pub restricted: bool,
+    pub origin: Option<Origin>,
+}
+
+impl Process {
+    pub fn id(&self) -> ProcId {
+        ProcId { space: self.space, pid: self.pid }
+    }
+
+    pub fn parent_id(&self) -> ProcId {
+        ProcId { space: self.space, pid: self.ppid }
+    }
 }
 
 /// Cumulative CPU time counters for one core (unit is platform specific; only

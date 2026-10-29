@@ -106,6 +106,7 @@ pub fn process_row(
     let ns_per_tick = 1_000_000_000 / env.ticks.max(1);
     let state = ProcState::from_linux(st.state);
     Ok(Process {
+        space: 0,
         pid: st.pid,
         ppid: st.ppid,
         pgid: st.pgrp,
@@ -126,6 +127,7 @@ pub fn process_row(
         // stat is world-readable, so every column is real even for other
         // users' processes; only fd/, environ, maps... are ptrace-gated.
         restricted: false,
+        origin: None,
     })
 }
 

@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use nix::sys::signal::Signal;
 
-use crate::collector::Collector;
 use crate::collector::cpu::{CoreTracker, CpuTracker, RateTracker};
+use crate::collector::{self, Collector};
 use crate::explain::Catalog;
 use crate::labs::LabSession;
 use crate::model::*;
@@ -172,7 +172,7 @@ impl DetailRow<'_> {
 }
 
 pub struct DetailState {
-    pub pid: Pid,
+    pub pid: ProcId,
     pub data: Result<ProcessDetails, String>,
     pub tab: Tab,
     pub selected: usize,
@@ -233,7 +233,7 @@ pub enum Mode {
 pub enum Scope {
     All,
     /// A process and its descendants.
-    Family(Pid),
+    Family(ProcId),
 }
 
 pub struct Row {
@@ -278,7 +278,7 @@ pub struct App {
     pub selected: usize,
     /// First visible table row, kept between frames so scrolling is stable.
     pub table_offset: usize,
-    selected_pid: Option<Pid>,
+    selected_pid: Option<ProcId>,
     pub sort: Column,
     pub sort_desc: bool,
     pub focus: Column,
@@ -411,29 +411,30 @@ impl App {
     /// Recompute visible rows: scope, filter, sort and tree layout.
     pub fn rebuild(&mut self) {
         let procs = &self.snapshot.processes;
-        let by_pid: HashMap<Pid, usize> = procs.iter().enumerate().map(|(i, p)| (p.pid, i)).collect();
-        let mut children: HashMap<Pid, Vec<usize>> = HashMap::new();
+        // Parents are looked up inside the same PID namespace (`space`).
+        let by_pid: HashMap<ProcId, usize> = procs.iter().enumerate().map(|(i, p)| (p.id(), i)).collect();
+        let mut children: HashMap<ProcId, Vec<usize>> = HashMap::new();
         for (i, p) in procs.iter().enumerate() {
             if p.ppid != p.pid {
-                children.entry(p.ppid).or_default().push(i);
+                children.entry(p.parent_id()).or_default().push(i);
             }
         }
 
-        let mut scope: Option<HashSet<Pid>> = match self.scope {
+        let mut scope: Option<HashSet<ProcId>> = match self.scope {
             Scope::All => None,
             Scope::Family(root) => {
                 let mut set = HashSet::new();
                 let mut stack = vec![root];
                 while let Some(pid) = stack.pop() {
                     if set.insert(pid) {
-                        stack.extend(children.get(&pid).into_iter().flatten().map(|&i| procs[i].pid));
+                        stack.extend(children.get(&pid).into_iter().flatten().map(|&i| procs[i].id()));
                     }
                 }
                 Some(set)
             }
         };
         if let Some(lab) = &self.lab {
-            let lab_set: HashSet<Pid> = procs.iter().filter(|p| lab.in_scope(p)).map(|p| p.pid).collect();
+            let lab_set: HashSet<ProcId> = procs.iter().filter(|p| lab.in_scope(p)).map(|p| p.id()).collect();
             scope = Some(match scope {
                 Some(s) => s.intersection(&lab_set).copied().collect(),
                 None => lab_set,
@@ -448,10 +449,10 @@ impl App {
                 || p.name.to_lowercase().contains(&needle)
                 || p.user.to_lowercase().contains(&needle)
         };
-        let mut keep: HashSet<Pid> = procs
+        let mut keep: HashSet<ProcId> = procs
             .iter()
-            .filter(|p| scope.as_ref().is_none_or(|s| s.contains(&p.pid)) && matches(p))
-            .map(|p| p.pid)
+            .filter(|p| scope.as_ref().is_none_or(|s| s.contains(&p.id())) && matches(p))
+            .map(|p| p.id())
             .collect();
 
         let (sort, desc) = (self.sort, self.sort_desc);
@@ -467,7 +468,7 @@ impl App {
                 for pid in keep.clone() {
                     let mut cur = pid;
                     while let Some(&i) = by_pid.get(&cur) {
-                        let pp = procs[i].ppid;
+                        let pp = procs[i].parent_id();
                         if pp == cur || !by_pid.contains_key(&pp) || scope.as_ref().is_some_and(|s| !s.contains(&pp)) {
                             break;
                         }
@@ -479,7 +480,7 @@ impl App {
             let mut roots: Vec<usize> = procs
                 .iter()
                 .enumerate()
-                .filter(|(_, p)| keep.contains(&p.pid) && (p.ppid == p.pid || !keep.contains(&p.ppid)))
+                .filter(|(_, p)| keep.contains(&p.id()) && (p.ppid == p.pid || !keep.contains(&p.parent_id())))
                 .map(|(i, _)| i)
                 .collect();
             roots.sort_by(order);
@@ -494,11 +495,11 @@ impl App {
                 };
                 rows.push(Row { idx: i, prefix: format!("{prefix}{branch}") });
                 let mut kids: Vec<usize> = children
-                    .get(&procs[i].pid)
+                    .get(&procs[i].id())
                     .into_iter()
                     .flatten()
                     .copied()
-                    .filter(|&k| keep.contains(&procs[k].pid))
+                    .filter(|&k| keep.contains(&procs[k].id()))
                     .collect();
                 kids.sort_by(order);
                 let next = match (depth, last) {
@@ -510,7 +511,7 @@ impl App {
                 stack.extend(kids.into_iter().enumerate().rev().map(|(j, k)| (k, next.clone(), j + 1 == n, depth + 1)));
             }
         } else {
-            let mut idx: Vec<usize> = (0..procs.len()).filter(|&i| keep.contains(&procs[i].pid)).collect();
+            let mut idx: Vec<usize> = (0..procs.len()).filter(|&i| keep.contains(&procs[i].id())).collect();
             idx.sort_by(order);
             rows.extend(idx.into_iter().map(|idx| Row { idx, prefix: String::new() }));
         }
@@ -519,7 +520,7 @@ impl App {
         // Once the user picks a process, keep it selected as rows reorder.
         // Until then (or after Home) the cursor stays on the top row.
         if let Some(pid) = self.selected_pid {
-            match self.rows.iter().position(|r| self.snapshot.processes[r.idx].pid == pid) {
+            match self.rows.iter().position(|r| self.snapshot.processes[r.idx].id() == pid) {
                 Some(pos) => self.selected = pos,
                 None => self.selected_pid = None,
             }
@@ -529,12 +530,12 @@ impl App {
 
     fn select(&mut self, i: usize) {
         self.selected = i.min(self.rows.len().saturating_sub(1));
-        self.selected_pid = self.selected_process().map(|p| p.pid);
+        self.selected_pid = self.selected_process().map(Process::id);
         self.explain_scroll = 0;
     }
 
     fn open_detail(&mut self) {
-        let Some(pid) = self.selected_process().map(|p| p.pid) else { return };
+        let Some(pid) = self.selected_process().map(Process::id) else { return };
         self.detail = Some(DetailState {
             pid,
             data: self.collector.details(pid).map_err(|e| e.to_string()),
@@ -551,6 +552,8 @@ impl App {
         if let Some(d) = self.detail.as_mut() {
             match self.collector.details(d.pid) {
                 Ok(data) => d.data = Ok(data),
+                // A remote answer is on its way; keep showing what we have.
+                Err(e) if collector::is_pending(&e) => {}
                 // Keep the last good data on screen and say what happened.
                 Err(e) if d.data.is_ok() => self.status = Some((format!("PID {}: {e}", d.pid), Instant::now())),
                 Err(e) => d.data = Err(e.to_string()),
@@ -675,7 +678,7 @@ impl App {
             }
             KeyCode::Char('f') => {
                 self.scope = match (self.scope, self.selected_process()) {
-                    (Scope::All, Some(p)) => Scope::Family(p.pid),
+                    (Scope::All, Some(p)) => Scope::Family(p.id()),
                     _ => Scope::All,
                 };
                 if self.scope != Scope::All {

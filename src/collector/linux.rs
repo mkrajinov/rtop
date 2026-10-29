@@ -245,7 +245,8 @@ impl Collector for LinuxCollector {
         Snapshot { system, processes }
     }
 
-    fn details(&mut self, pid: Pid) -> anyhow::Result<ProcessDetails> {
+    fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
+        let pid = id.pid;
         let dir = format!("/proc/{pid}");
         let f = |name: &str| read(&format!("{dir}/{name}"));
         let stat = f("stat").ok_or_else(|| anyhow::anyhow!("{dir}/stat is gone: the process exited"))?;
@@ -356,7 +357,7 @@ mod tests {
         let (net, disk) = (snap.system.net.as_ref().unwrap(), snap.system.disk.as_ref().unwrap());
         assert!(net.read > 0 && disk.read > 0, "{net:?} {disk:?}");
         eprintln!("{net:?}\n{disk:?}\n{:?}", snap.system.gpu);
-        let d = c.details(me).unwrap();
+        let d = c.details(ProcId::local(me)).unwrap();
         assert!(d.files.iter().any(|f| f.fd <= 2));
         assert!(!d.regions.is_empty() && !d.threads.is_empty() && !d.limits.is_empty());
         assert!(

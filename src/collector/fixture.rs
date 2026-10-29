@@ -7,6 +7,7 @@ use crate::model::*;
 
 pub fn process(pid: Pid, ppid: Pid, name: &str) -> Process {
     Process {
+        space: 0,
         pid,
         ppid,
         pgid: pid,
@@ -25,6 +26,7 @@ pub fn process(pid: Pid, ppid: Pid, name: &str) -> Process {
         fds: Some(4),
         start_time: 1_700_000_000,
         restricted: false,
+        origin: None,
     }
 }
 
@@ -97,8 +99,9 @@ impl Collector for FixtureCollector {
         self.snapshot.clone()
     }
 
-    fn details(&mut self, pid: Pid) -> anyhow::Result<ProcessDetails> {
-        let Some(p) = self.snapshot.processes.iter().find(|p| p.pid == pid) else {
+    fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
+        let pid = id.pid;
+        let Some(p) = self.snapshot.processes.iter().find(|p| p.id() == id) else {
             bail!("no such process: {pid}");
         };
         Ok(ProcessDetails {

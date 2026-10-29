@@ -17,15 +17,37 @@ mod macos;
 
 use std::collections::HashMap;
 
-use crate::model::{Pid, ProcessDetails, Snapshot};
+use crate::model::{ProcId, ProcessDetails, Snapshot, Target};
 
 pub trait Collector {
     /// Human name of the platform, shown in the header.
     fn platform(&self) -> &'static str;
     /// Cheap per-tick listing of every process plus system totals.
     fn snapshot(&mut self) -> Snapshot;
-    /// Everything we can learn about one process. Called when it is opened.
-    fn details(&mut self, pid: Pid) -> anyhow::Result<ProcessDetails>;
+    /// Everything we can learn about one process. Called when it is opened
+    /// and again on every refresh while it stays open. A remote collector
+    /// returns [`Pending`] until the answer arrives instead of blocking.
+    fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails>;
+    /// The Kubernetes pod or node being read; `None` for this machine.
+    fn target(&self) -> Option<&Target> {
+        None
+    }
+}
+
+/// `details()` has been requested but the answer is still on its way.
+#[derive(Debug)]
+pub struct Pending;
+
+impl std::fmt::Display for Pending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("loading…")
+    }
+}
+
+impl std::error::Error for Pending {}
+
+pub fn is_pending(e: &anyhow::Error) -> bool {
+    e.is::<Pending>()
 }
 
 #[cfg(target_os = "linux")]

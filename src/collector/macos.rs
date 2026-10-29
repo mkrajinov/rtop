@@ -162,6 +162,7 @@ impl Collector for MacCollector {
             let start = bsd.pbi_start_tvsec;
             let cmdline = if bsd.pbi_status == libc::SZOMB { String::new() } else { self.cmdline(pid, start, &name) };
             processes.push(Process {
+                space: 0,
                 pid,
                 ppid: bsd.pbi_ppid as Pid,
                 pgid: bsd.pbi_pgid as Pid,
@@ -180,6 +181,7 @@ impl Collector for MacCollector {
                 fds: task.and_then(|_| list_fds(pid)).map(|f| f.len() as u32),
                 start_time: start,
                 restricted: task.is_none() && bsd.pbi_status != libc::SZOMB,
+                origin: None,
             });
         }
         let live: std::collections::HashSet<_> = processes.iter().map(|p| (p.pid, p.start_time)).collect();
@@ -187,7 +189,8 @@ impl Collector for MacCollector {
         Snapshot { system: self.system(), processes }
     }
 
-    fn details(&mut self, pid: Pid) -> anyhow::Result<ProcessDetails> {
+    fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
+        let pid = id.pid;
         let Some((bsd, from_kinfo)) = bsd_info(pid) else {
             bail!("neither proc_pidinfo nor sysctl(KERN_PROC_PID) know {pid}: the process is gone");
         };
@@ -1236,7 +1239,7 @@ mod tests {
         let p = snap.processes.iter().find(|p| p.pid == me).expect("own pid listed");
         assert!(p.rss > 0 && p.threads >= 1 && !p.restricted);
         assert!(snap.processes.iter().any(|p| p.pid == 1 && p.name == "launchd"), "root's launchd via kinfo_proc");
-        let d = c.details(me).unwrap();
+        let d = c.details(ProcId::local(me)).unwrap();
         assert!(d.files.iter().any(|f| f.fd == 0 || f.fd == 1 || f.fd == 2));
         assert!(!d.regions.is_empty());
         assert!(!d.threads.is_empty());
