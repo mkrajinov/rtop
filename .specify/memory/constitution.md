@@ -51,7 +51,10 @@ refresh tick require (dirty flag, drain queued events, draw once). Collection MU
 block the UI on slow sources. The TUI process MUST NOT `fork`; labs re-exec rtop as
 `__lab-worker` in their own process group, are killed with the group when rtop exits,
 and exit on their own after a timeout. rtop is read-only except for explicit user
-actions (signal, renice) and labs.
+actions (signal, renice) and labs. In Kubernetes mode rtop may add to the cluster only what
+reading requires (an ephemeral debug container, a node helper pod); each addition MUST be
+labelled as rtop's, have a bounded lifetime, be announced to the user, and be possible to
+disable.
 
 Rationale: a monitor that distorts the system it measures teaches the wrong lesson.
 
@@ -61,7 +64,8 @@ Rationale: a monitor that distorts the system it measures teaches the wrong less
 - New dependencies need a reason a few lines of code cannot meet; macOS FFI (IOKit, SMC,
   HID) is raw `extern "C"` confined to collector modules, with owned wrappers that
   release resources on `Drop`.
-- No network access at runtime; no telemetry.
+- No network access at runtime, except Kubernetes mode, which talks only to the API server of
+  the kubeconfig context the user selected, through `kubectl`. No telemetry.
 - Colours are exact Tailwind CSS v4 palette values, chosen through the theme system.
 - UI accents never use borders or colour stripes flush against an edge; selection uses a
   background highlight, accents are inset glyphs or detached pills.
@@ -85,4 +89,4 @@ semantic versioning: MAJOR for removing or redefining a principle, MINOR for add
 principle or section, PATCH for wording. Runtime guidance lives in `README.md` and
 `ROADMAP.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-29 | **Last Amended**: 2026-10-29
+**Version**: 1.1.0 | **Ratified**: 2026-10-29 | **Last Amended**: 2026-10-29
