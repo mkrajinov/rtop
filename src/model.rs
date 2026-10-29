@@ -270,6 +270,39 @@ pub struct Snapshot {
     /// two samples, so it must use this clock, not the time of arrival.
     /// `None`: the sample was taken just now.
     pub clock: Option<std::time::Instant>,
+    /// Pod mode: what each container may use and uses (User Story 4).
+    pub containers: Vec<ContainerUsage>,
+}
+
+/// One container of a pod: its cgroup's usage against its limits, and the
+/// requests, limits and restarts from the pod object.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ContainerUsage {
+    pub name: String,
+    /// Cores used since the previous sample (`cpu.stat` usage_usec).
+    pub cpu_cores: Option<f64>,
+    /// `cpu.max` as cores; `None`: no limit.
+    pub cpu_limit: Option<f64>,
+    /// Share of scheduler periods since the previous sample in which the
+    /// container hit its quota and waited.
+    pub throttled_pct: Option<f64>,
+    /// Since the container started: throttled periods and time waited.
+    pub throttled_periods: Option<u64>,
+    pub throttled_secs: Option<f64>,
+    pub mem_current: Option<u64>,
+    /// `memory.max`; `None`: no limit.
+    pub mem_max: Option<u64>,
+    pub mem_peak: Option<u64>,
+    pub oom_kills: Option<u64>,
+    /// From the pod spec, as written (`500m`, `256Mi`).
+    pub cpu_request: Option<String>,
+    pub mem_request: Option<String>,
+    pub restarts: i32,
+    pub last_termination: Option<String>,
+    /// Where the cgroup files were read, or why they were not.
+    pub source: String,
+    /// The cgroup could not be read; the spec values are still shown.
+    pub unreadable: bool,
 }
 
 /// A value plus its provenance.

@@ -89,6 +89,7 @@ impl Default for FixtureCollector {
                 },
                 processes: vec![init, shell, hog, zombie],
                 clock: None,
+                containers: Vec::new(),
             },
             target: None,
             link: None,

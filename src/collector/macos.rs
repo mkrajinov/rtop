@@ -186,7 +186,7 @@ impl Collector for MacCollector {
         }
         let live: std::collections::HashSet<_> = processes.iter().map(|p| (p.pid, p.start_time)).collect();
         self.cmdlines.retain(|k, _| live.contains(k));
-        Snapshot { system: self.system(), processes, clock: None }
+        Snapshot { system: self.system(), processes, clock: None, containers: Vec::new() }
     }
 
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {

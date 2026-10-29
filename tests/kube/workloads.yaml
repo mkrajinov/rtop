@@ -64,3 +64,24 @@ spec:
       resources:
         requests: { cpu: 100m, memory: 64Mi }
         limits: { cpu: 500m, memory: 256Mi }
+---
+# Story 4: the shell grows by 1 MiB a second until it passes the 48Mi limit,
+# about 40 s after each start. The kubelet sets memory.oom.group on cgroup v2,
+# so the OOM killer ends the whole container: it restarts (OOMKilled, with
+# back-off), and the new container's memory.events starts from zero.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oom
+  namespace: rtop-demo
+spec:
+  containers:
+    - name: app
+      image: busybox:1.37
+      command:
+        - sh
+        - -c
+        - 'x=; while :; do x=$x$(head -c 1048576 /dev/zero | tr "\0" a); sleep 1; done'
+      resources:
+        requests: { cpu: 50m, memory: 32Mi }
+        limits: { cpu: 200m, memory: 48Mi }

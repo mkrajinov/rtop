@@ -646,3 +646,100 @@ pitfalls = [
 ]
 try = ["cat /proc/self/cgroup", "kubectl get pods -A --field-selector spec.nodeName=NODE -o wide", "systemd-cgls (on the node)"]
 man = ["cgroups(7)", "cgroup_namespaces(7)", "pid_namespaces(7)"]
+
+[container_meminfo]
+title = "Why the memory and cpu cards show the node inside a container"
+what = "Namespaces change what a process can see (its PIDs, mounts, network); cgroups limit what it can use. /proc/meminfo, /proc/stat, /proc/loadavg and the CPU count belong to neither: the kernel answers them for the whole machine, from any container. So free, top, nproc and runtimes that size themselves from them (older JVMs, Go before GOMAXPROCS respected quotas, Node.js heap defaults) see the node, not the limit, and may plan for memory they will never get.\nIn pod mode rtop labels the memory and cpu cards 'node' and puts the containers card first: that one is read from each container's own cgroup."
+linux = "Node-wide: /proc/meminfo, /proc/stat, /proc/loadavg. The container's share: /sys/fs/cgroup/memory.max, memory.current, cpu.max, cpu.stat (cgroup v2, seen from inside the container's cgroup namespace)."
+macos = "Containers run Linux; on a Mac they live in a Linux VM, and the same applies inside it."
+pitfalls = [
+  "A container whose memory.current reaches memory.max is OOM-killed even though /proc/meminfo shows gigabytes free.",
+  "nproc shows the node's cores; cpu.max of 50000 100000 means half of one core.",
+  "LXCFS can mount per-container versions of these files over /proc; most Kubernetes clusters do not use it.",
+]
+try = ["kubectl exec POD -- sh -c 'head -1 /proc/meminfo; cat /sys/fs/cgroup/memory.max'", "kubectl exec POD -- sh -c 'nproc; cat /sys/fs/cgroup/cpu.max'"]
+man = ["proc(5)", "cgroups(7)", "cgroup_namespaces(7)"]
+
+[k8s_limits]
+title = "Limits — what a container may use"
+what = "resources.limits in the pod spec. The kubelet writes them into the container's cgroup: the CPU limit becomes cpu.max (a quota of CPU time per 100 ms period: 500m is '50000 100000'), the memory limit becomes memory.max in bytes. The kernel enforces them, not Kubernetes: a container over its CPU quota waits for the next period (throttling), one over its memory limit is OOM-killed."
+linux = "/sys/fs/cgroup/cpu.max and /sys/fs/cgroup/memory.max inside the container; pod.spec.containers[].resources.limits in the API. rtop shows the cgroup values and falls back to the spec when the cgroup cannot be read."
+macos = "Not applicable: limits are enforced by the Linux kernel on the node."
+pitfalls = [
+  "A CPU limit throttles even when the node is idle: the quota is per container, not a share of spare capacity.",
+  "No memory limit means the container can use the node's memory until the node runs short, and then the kubelet evicts pods.",
+]
+try = ["kubectl get pod POD -o jsonpath='{.spec.containers[*].resources}'", "kubectl exec POD -- cat /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max"]
+man = ["cgroups(7)"]
+
+[k8s_requests]
+title = "Requests — what the scheduler reserves"
+what = "resources.requests decide where a pod is placed: the scheduler only puts it on a node whose allocatable capacity minus the requests already placed there can hold it. At run time the CPU request becomes cpu.weight, the container's share when CPUs are contended. The memory request is not enforced at all; it only matters for scheduling and for which pods the kubelet evicts first under memory pressure."
+linux = "pod.spec.containers[].resources.requests; /sys/fs/cgroup/cpu.weight for the CPU part."
+macos = "Not applicable."
+pitfalls = [
+  "Requests far below real usage overcommit the node; requests far above it waste capacity no one else may use.",
+  "The QoS class (Guaranteed, Burstable, BestEffort) follows from requests and limits and sets the order of eviction.",
+]
+try = ["kubectl describe node NODE | grep -A8 'Allocated resources'", "kubectl get pod POD -o jsonpath='{.status.qosClass}'"]
+man = ["cgroups(7)"]
+
+[cgroup_cpu_throttled]
+title = "Throttled — waiting for the next CPU period"
+what = "With a CPU limit the kernel gives the container a quota of CPU time per period (cpu.max, usually 100 ms). When its threads have used the quota, they are not scheduled again until the period ends, even if cores are idle. cpu.stat counts the periods in which that happened (nr_throttled) out of all periods in which it ran (nr_periods), and the total time spent waiting (throttled_usec). rtop shows the share of periods throttled since the last refresh."
+linux = "/sys/fs/cgroup/cpu.stat: nr_periods, nr_throttled, throttled_usec."
+macos = "Not applicable."
+pitfalls = [
+  "A multi-threaded program can use a 100 ms quota in 25 ms on four cores and then stall for 75 ms: latency spikes at low average CPU.",
+  "100% throttled with usage at the limit means the limit is the bottleneck, not the node.",
+]
+try = ["kubectl exec POD -- cat /sys/fs/cgroup/cpu.stat"]
+man = ["cgroups(7)", "sched(7)"]
+
+[cgroup_oom_kill]
+title = "OOM kills — memory.max reached"
+what = "When a cgroup's memory use reaches memory.max and the kernel cannot reclaim enough (page cache, swap), the OOM killer ends a process in that cgroup. memory.events counts these in oom_kill. On cgroup v2 the kubelet sets memory.oom.group, so the whole container is killed at once; Kubernetes then reports the container as terminated with reason OOMKilled (exit 137 = 128 + SIGKILL) and restarts it."
+linux = "/sys/fs/cgroup/memory.events (oom, oom_kill), memory.oom.group; status.containerStatuses[].lastState.terminated.reason in the API."
+macos = "Not applicable."
+pitfalls = [
+  "After a restart the container has a new cgroup and oom_kill starts again at 0: the restart count and 'last OOMKilled' are the lasting record.",
+  "The node can have plenty of free memory: the limit is per container.",
+]
+try = ["kubectl exec POD -- cat /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.oom.group", "kubectl get pod POD -o jsonpath='{.status.containerStatuses[*].lastState}'"]
+man = ["cgroups(7)"]
+
+[k8s_restarts]
+title = "Restarts — the container started again"
+what = "The kubelet restarts a container that exits (restartPolicy Always or OnFailure), with a growing back-off between attempts (CrashLoopBackOff). Each restart is a new container: new PIDs, a new cgroup, counters from zero. rtop notices the new container ID, starts a fresh reader and keeps the reason the previous one ended."
+linux = "status.containerStatuses[].restartCount and lastState.terminated (reason, exitCode)."
+macos = "Not applicable."
+pitfalls = [
+  "Exit code 137 is SIGKILL: an OOM kill, or a kill after the termination grace period.",
+  "A pod's restart count includes restarts from long ago; check lastState for when and why.",
+]
+try = ["kubectl get pod POD -o wide", "kubectl logs POD --previous"]
+man = ["signal(7)"]
+
+[k8s_ephemeral_container]
+title = "Ephemeral (debug) containers"
+what = "A container added to a running pod through the pods/ephemeralcontainers subresource, as kubectl debug does. With targetContainerName it joins that container's PID namespace, so its tools can see the target's processes in /proc even when the target image has no shell. rtop adds one (busybox) when it cannot run sh in a container."
+linux = "pod.spec.ephemeralContainers and status.ephemeralContainerStatuses. The target's files: /proc/1/root/... from inside it."
+macos = "Not applicable."
+pitfalls = [
+  "Ephemeral containers can never be removed or restarted: they stay in the pod spec, terminated, until the pod is deleted.",
+  "When the target container restarts, its PID 1 dies and the kernel kills everything in that PID namespace, the debug container included.",
+]
+try = ["kubectl debug -it POD --image=busybox:1.37 --target=CONTAINER", "kubectl get pod POD -o jsonpath='{.spec.ephemeralContainers[*].name}'"]
+man = ["pid_namespaces(7)"]
+
+[k8s_host_pid]
+title = "hostPID — the node's PID namespace"
+what = "A pod with hostPID: true shares the node's PID namespace, so /proc in it lists every process on the node: systemd, kubelet, containerd and every container. rtop's node view reads the node through such a helper pod. Seeing processes is not the same as reading their details: other users' environ, fd/ and maps also need root and CAP_SYS_PTRACE."
+linux = "pod.spec.hostPID. Inside: /proc/1 is the node's init; /proc/1/root is the node's root file system."
+macos = "Not applicable."
+pitfalls = [
+  "Pod Security 'baseline' and 'restricted' forbid hostPID: it needs a namespace allowed 'privileged'.",
+  "Root in a hostPID pod can signal any root process on the node, capabilities or not: rtop's node view never sends signals.",
+]
+try = ["kubectl debug node/NODE -it --image=busybox:1.37 -- ps"]
+man = ["pid_namespaces(7)", "capabilities(7)"]

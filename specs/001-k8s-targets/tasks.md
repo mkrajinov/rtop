@@ -198,14 +198,22 @@ the lessons in the explain panel.
 
 **Independent Test**: quickstart.md §6 with the `limited` pod.
 
-- [ ] T049 [P] [US4] Unit tests in src/collector/linux_parse.rs for new parsers of `cpu.stat`, `memory.events` and `cpu.max`
-- [ ] T050 [P] [US4] Snapshot test in tests/ui.rs: container usage card with limits, throttling and an OOM count
-- [ ] T051 [US4] Add parsers `cgroup_cpu_stat`, `cgroup_memory_events` and `cgroup_cpu_max` to src/collector/linux_parse.rs
-- [ ] T052 [US4] `snap` cgroup root: `/sys/fs/cgroup` for exec sessions, `/proc/<target pid 1>/root/sys/fs/cgroup` for debug sessions, with a fallback note when unreadable, in src/kube/reader.sh and src/collector/kube.rs (research R7)
-- [ ] T053 [US4] `ContainerUsage` with CPU % of the `cpu.max` quota and memory % of the limit, plus requests and limits from PodInfo, in src/collector/kube.rs
-- [ ] T054 [US4] Container usage card replacing the battery or GPU slot in pod mode, with sources in the title, in src/ui/header.rs
-- [ ] T055 [US4] Explain entries in assets/explain.toml: `container`, `pod`, `k8s.limits`, `k8s.requests`, `cgroup.cpu_throttled`, `cgroup.oom_kill`, `k8s.restarts`, `k8s.ephemeral_container`, `k8s.host_pid`, and "meminfo in a container shows the node"
-- [ ] T056 [US4] Validate quickstart.md §6 on kind
+- [X] T049 [P] [US4] Unit tests in src/collector/linux_parse.rs for new parsers of `cpu.stat`, `memory.events` and `cpu.max`
+  - Done: `cgroup_files_from_kind` with values read in the `limited` pod; parsers `cgroup_cpu_stat`, `cgroup_cpu_max`, `cgroup_bytes`, `cgroup_oom_kills`.
+- [X] T050 [P] [US4] Snapshot test in tests/ui.rs: container usage card with limits, throttling and an OOM count
+  - Done: `pod_mode_containers_card_shows_limits_throttling_and_ooms` (limit, throttling, OOM kill, `last OOMKilled`, no-limit and unreadable rows), plus the `L` lessons.
+- [X] T051 [US4] Add parsers `cgroup_cpu_stat`, `cgroup_memory_events` and `cgroup_cpu_max` to src/collector/linux_parse.rs
+  - Done (as named in T049).
+- [X] T052 [US4] `snap` cgroup root: `/sys/fs/cgroup` for exec sessions, `/proc/<target pid 1>/root/sys/fs/cgroup` for debug sessions, with a fallback note when unreadable, in src/kube/reader.sh and src/collector/kube.rs (research R7)
+  - Done: `snap <seq> <root>` adds `cg <file>` frames read with builtins (`_text`). Exec sessions use `/sys/fs/cgroup`, debug sessions `/proc/1/root/sys/fs/cgroup` (works on kind with SYS_PTRACE). In a shared PID namespace only the reader's own container is read; the others show their spec limits and say why.
+- [X] T053 [US4] `ContainerUsage` with CPU % of the `cpu.max` quota and memory % of the limit, plus requests and limits from PodInfo, in src/collector/kube.rs
+  - Done: `ContainerUsage` in `Snapshot.containers`, CPU cores and throttled share from the deltas between two samples on the target's clock (`/proc/uptime`), restarts and the last termination reason from the pod status.
+- [X] T054 [US4] Container usage card replacing the battery or GPU slot in pod mode, with sources in the title, in src/ui/header.rs
+  - Done differently: in pod mode the containers card takes the CPU card's place in the first row; the memory card is titled `memory · node`, and the node's CPU card moves to the second row. A card row now keeps its full height when the dashboard has one row (it was squeezed to half before, in every mode).
+- [X] T055 [US4] Explain entries in assets/explain.toml: `container`, `pod`, `k8s.limits`, `k8s.requests`, `cgroup.cpu_throttled`, `cgroup.oom_kill`, `k8s.restarts`, `k8s.ephemeral_container`, `k8s.host_pid`, and "meminfo in a container shows the node"
+  - Done: `pod` and `container` (US1/US2) plus `container_meminfo`, `k8s_limits`, `k8s_requests`, `cgroup_cpu_throttled`, `cgroup_oom_kill`, `k8s_restarts`, `k8s_ephemeral_container`, `k8s_host_pid` (TOML keys use `_`). `L` steps through them in the explain panel.
+- [X] T056 [US4] Validate quickstart.md §6 on kind
+  - Done on kind: `limited` shows `0.50 / 0.5` and `thr 100%`; a new `oom` demo pod (48Mi, grows 1 MiB/s) shows `↻ 4 last OOMKilled`. On cgroup v2 the kubelet sets `memory.oom.group`, so the whole container is killed and its new cgroup's `oom_kill` starts at 0: the restart reason is the lasting record.
 
 **Checkpoint**: all stories work independently.
 

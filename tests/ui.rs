@@ -310,3 +310,74 @@ fn k8s_picker_lists_nodes_and_confirms_the_helper() {
     insta::assert_snapshot!(screen);
     assert_eq!(p.handle_key(KeyEvent::from(KeyCode::Char('y'))), Action::OpenNode { node: "worker-1".into() });
 }
+
+#[test]
+fn pod_mode_containers_card_shows_limits_throttling_and_ooms() {
+    use rtop::model::{ContainerUsage, Target};
+    let mut c = FixtureCollector {
+        target: Some(Target::Pod {
+            context: "kind-rtop".into(),
+            namespace: "rtop-demo".into(),
+            pod: "web".into(),
+            node: Some("rtop-control-plane".into()),
+            container: None,
+        }),
+        ..Default::default()
+    };
+    c.snapshot.containers = vec![
+        ContainerUsage {
+            name: "app".into(),
+            cpu_cores: Some(0.5),
+            cpu_limit: Some(0.5),
+            throttled_pct: Some(97.0),
+            mem_current: Some(200 << 20),
+            mem_max: Some(256 << 20),
+            oom_kills: Some(1),
+            restarts: 3,
+            last_termination: Some("terminated: OOMKilled (exit 137)".into()),
+            source: "[web/app] /sys/fs/cgroup/".into(),
+            ..Default::default()
+        },
+        ContainerUsage {
+            name: "sidecar".into(),
+            cpu_cores: Some(0.01),
+            mem_current: Some(12 << 20),
+            oom_kills: Some(0),
+            source: "[web/sidecar] /sys/fs/cgroup/".into(),
+            ..Default::default()
+        },
+        ContainerUsage {
+            name: "logger".into(),
+            cpu_limit: Some(0.1),
+            mem_max: Some(64 << 20),
+            unreadable: true,
+            source: "container is waiting: CrashLoopBackOff".into(),
+            ..Default::default()
+        },
+    ];
+    let mut app = App::new(Box::new(c));
+    app.refresh();
+    let screen = render(&mut app, 170, 24);
+    for want in [
+        "memory · node",
+        "0.50 / 0.5",
+        "thr  97% ",
+        "200M / 256M",
+        "oom 1",
+        "↻ 3 last OOMKilled",
+        "· no limit",
+        "limits cpu 0.1 mem 64.0M",
+    ] {
+        assert!(screen.contains(want), "{want}\n{screen}");
+    }
+    insta::assert_snapshot!(screen);
+
+    // L walks through the lessons in the explain panel.
+    press(&mut app, KeyCode::Char('L'));
+    assert!(app.show_explain);
+    assert_eq!(app.explain_key(), "container_meminfo");
+    press(&mut app, KeyCode::Char('L'));
+    assert_eq!(app.explain_key(), "k8s_limits");
+    press(&mut app, KeyCode::Right);
+    assert_ne!(app.explain_key(), "k8s_limits");
+}

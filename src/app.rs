@@ -120,6 +120,19 @@ impl Column {
     }
 }
 
+/// What the explain panel teaches about Kubernetes, in the order `L`
+/// shows them (User Story 4).
+pub const KUBE_LESSONS: &[&str] = &[
+    "container_meminfo",
+    "k8s_limits",
+    "cgroup_cpu_throttled",
+    "cgroup_oom_kill",
+    "k8s_requests",
+    "k8s_restarts",
+    "k8s_ephemeral_container",
+    "k8s_host_pid",
+];
+
 /// The container a process runs in; empty in local mode.
 pub fn container(p: &Process) -> &str {
     p.origin.as_ref().map_or("", |o| &o.container)
@@ -331,6 +344,9 @@ pub struct App {
     /// which `back` tells the caller.
     pub can_go_back: bool,
     pub back: bool,
+    /// Kubernetes mode: the lesson the explain panel shows (`L`) instead of
+    /// the focused column's entry.
+    pub lesson: Option<usize>,
 }
 
 impl App {
@@ -376,6 +392,7 @@ impl App {
             quit: false,
             can_go_back: false,
             back: false,
+            lesson: None,
         }
     }
 
@@ -715,6 +732,12 @@ impl App {
             KeyCode::End => self.select(usize::MAX),
             KeyCode::Left => self.move_focus(-1),
             KeyCode::Right => self.move_focus(1),
+            KeyCode::Char('L') if self.collector.target().is_some() => {
+                let next = self.lesson.map_or(0, |i| i + 1);
+                self.lesson = (next < KUBE_LESSONS.len()).then_some(next);
+                self.show_explain = self.lesson.is_some();
+                self.explain_scroll = 0;
+            }
             KeyCode::Char('s') | KeyCode::F(6) => self.sort_by(self.focus),
             KeyCode::Char('<') => {
                 self.move_focus(-1);
@@ -796,6 +819,7 @@ impl App {
     }
 
     fn move_focus(&mut self, delta: isize) {
+        self.lesson = None;
         let cols = self.columns();
         let i = cols.iter().position(|c| *c == self.focus).unwrap_or(0) as isize;
         let n = cols.len() as isize;
@@ -952,7 +976,7 @@ impl App {
     pub fn explain_key(&self) -> &'static str {
         match (&self.mode, &self.detail) {
             (_, Some(d)) => d.rows().get(d.selected).map_or("pid", |r| r.key(d.tab)),
-            _ => self.focus.key(),
+            _ => self.lesson.map_or(self.focus.key(), |i| KUBE_LESSONS[i]),
         }
     }
 }

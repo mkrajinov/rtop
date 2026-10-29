@@ -71,6 +71,9 @@ pub struct Session {
     /// Owner of the reader's own cgroup; default: `exec_in` or `container`
     /// of this pod.
     pub own: Option<Origin>,
+    /// The container's cgroup directory as the reader sees it; each `snap`
+    /// then also returns its usage and limit files. `None` on a node.
+    pub cg_root: Option<String>,
     /// Shell assignments run before the reader (node mode points it at the
     /// host's /etc/passwd and network namespace).
     pub prelude: String,
@@ -109,6 +112,7 @@ impl Session {
             cmdlines: HashMap::new(),
             shared: None,
             own: None,
+            cg_root: None,
             prelude: String::new(),
             exec_in: None,
             to_close: None,
@@ -280,7 +284,8 @@ impl Session {
             Some((_, sent)) if now - sent > every * 2 => self.phase = Phase::Stale,
             Some(_) => {}
             None => {
-                if let Some(seq) = self.write(k, "snap", "") {
+                let root = self.cg_root.clone().unwrap_or_default();
+                if let Some(seq) = self.write(k, "snap", &root) {
                     self.snap_sent = Some((seq, now));
                 }
             }

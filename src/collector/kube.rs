@@ -92,7 +92,17 @@ pub struct KubeCollector {
     epoch: Option<(f64, Instant)>,
     notes: Vec<String>,
     node: Option<NodeMode>,
+    /// Per container: the last `cpu.stat` and the target uptime it was read
+    /// at, and the rates computed from the two samples before it.
+    cg_prev: HashMap<String, (lp::CgroupCpuStat, f64)>,
+    cg_rates: HashMap<String, (f64, Option<f64>)>,
 }
+
+/// A container's own cgroup: with a private cgroup namespace (the
+/// default with cgroup v2) the runtime mounts it at /sys/fs/cgroup.
+const OWN_CGROUP: &str = "/sys/fs/cgroup";
+/// The target container's cgroup seen from its debug container.
+const TARGET_CGROUP: &str = "/proc/1/root/sys/fs/cgroup";
 
 /// How long start-up waits for the cluster before giving up.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -131,6 +141,8 @@ impl KubeCollector {
             epoch: None,
             notes: Vec::new(),
             node: None,
+            cg_prev: HashMap::new(),
+            cg_rates: HashMap::new(),
             pod,
         };
         c.plan_sessions();
@@ -185,6 +197,8 @@ impl KubeCollector {
                 deadline,
                 replacing: None,
             }),
+            cg_prev: HashMap::new(),
+            cg_rates: HashMap::new(),
             pod,
         };
         c.helper_note();
@@ -284,11 +298,13 @@ impl KubeCollector {
             if let Some(c) = self.pod.containers.iter().find(|c| c.state == "running") {
                 let mut s = Session::new(0, &c.name);
                 s.shared = Some(self.owners());
+                s.cg_root = Some(OWN_CGROUP.into());
                 self.sessions.push(s);
             }
         } else {
             for (i, c) in self.pod.containers.iter().enumerate() {
                 let mut s = Session::new(i as u16 + 1, &c.name);
+                s.cg_root = Some(OWN_CGROUP.into());
                 if c.state != "running" {
                     s.stop(&format!("container is {}", c.state));
                 }
@@ -371,6 +387,9 @@ impl KubeCollector {
                 let ids = self.owners();
                 let s = &mut self.sessions[i];
                 s.exec_in = Some(name.into());
+                // The target's cgroup, through its PID 1's mount namespace
+                // (the debug container shares its PID namespace).
+                s.cg_root = Some(TARGET_CGROUP.into());
                 // The reader now sits next to the target: tell their
                 // processes apart by cgroup, as in a shared namespace.
                 s.shared = Some(ids);
@@ -503,6 +522,87 @@ impl KubeCollector {
         if !self.notes.iter().any(|n| n == text) {
             self.notes.push(text.to_string());
         }
+    }
+
+    /// Each container's cgroup usage against its limits, plus requests,
+    /// limits and restarts from the pod (User Story 4).
+    fn container_usage(&mut self) -> Vec<ContainerUsage> {
+        if self.node.is_some() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for c in &self.pod.containers {
+            let mut u = ContainerUsage {
+                name: c.name.clone(),
+                cpu_request: c.requests.get("cpu").cloned(),
+                mem_request: c.requests.get("memory").cloned(),
+                restarts: c.restarts,
+                last_termination: c.last_termination.clone(),
+                // Until the cgroup is read, the spec's limits.
+                cpu_limit: c.limits.get("cpu").and_then(|q| cpu_quantity(q)),
+                mem_max: c.limits.get("memory").and_then(|q| crate::fmt::quantity_bytes(q)),
+                unreadable: true,
+                ..Default::default()
+            };
+            // The session whose reader can see this container's cgroup.
+            let s = self.sessions.iter().find(|s| *s.container == *c.name && s.cg_root.is_some());
+            let sample = s.and_then(|s| s.latest.as_ref());
+            let file = |name: &str| sample.and_then(|l| l.resp.text(&format!("cg {name}")));
+            u.source = match s {
+                None if self.pod.share_process_namespace => {
+                    "not read: in a shared PID namespace rtop reads only its own container's cgroup".into()
+                }
+                None => format!("container is {}", c.state),
+                Some(s) => {
+                    let via = s.exec_in.as_deref().map(|d| format!(" via {d}")).unwrap_or_default();
+                    let root = s.cg_root.as_deref().unwrap_or_default();
+                    format!("[{}/{}{via}] {root}/", self.pod.name, c.name)
+                }
+            };
+            if let Some(stat) = file("cpu.stat").map(|t| lp::cgroup_cpu_stat(&t)) {
+                u.unreadable = false;
+                u.cpu_limit = file("cpu.max").and_then(|t| lp::cgroup_cpu_max(&t));
+                u.mem_current = file("memory.current").and_then(|t| lp::cgroup_bytes(&t));
+                u.mem_max = file("memory.max").and_then(|t| lp::cgroup_bytes(&t));
+                u.mem_peak = file("memory.peak").and_then(|t| lp::cgroup_bytes(&t));
+                u.oom_kills = file("memory.events").and_then(|t| lp::cgroup_oom_kills(&t));
+                u.throttled_periods = Some(stat.nr_throttled);
+                u.throttled_secs = Some(stat.throttled_usec as f64 / 1e6);
+                let up = sample.and_then(|l| l.resp.text("/proc/uptime")).and_then(|t| uptime(&t));
+                if let Some(up) = up {
+                    match self.cg_prev.get(&c.name) {
+                        Some((prev, at)) if up > *at && stat.usage_usec >= prev.usage_usec => {
+                            let cores = (stat.usage_usec - prev.usage_usec) as f64 / 1e6 / (up - at);
+                            let periods = stat.nr_periods.saturating_sub(prev.nr_periods);
+                            let thr = (periods > 0).then(|| {
+                                stat.nr_throttled.saturating_sub(prev.nr_throttled) as f64 / periods as f64 * 100.0
+                            });
+                            self.cg_rates.insert(c.name.clone(), (cores, thr));
+                            self.cg_prev.insert(c.name.clone(), (stat, up));
+                        }
+                        // The same sample again: keep the rates.
+                        Some((_, at)) if up == *at => {}
+                        // First sample, or the container restarted.
+                        _ => {
+                            self.cg_rates.remove(&c.name);
+                            self.cg_prev.insert(c.name.clone(), (stat, up));
+                        }
+                    }
+                }
+                if let Some((cores, thr)) = self.cg_rates.get(&c.name) {
+                    u.cpu_cores = Some(*cores);
+                    u.throttled_pct = *thr;
+                }
+            } else if let Some(s) = s {
+                u.source = match (&s.latest, s.phase, &s.error) {
+                    (Some(_), _, _) => format!("{}: cgroup files not readable", u.source.trim_end_matches('/')),
+                    (None, Phase::Down, Some(e)) => e.clone(),
+                    _ => "connecting…".into(),
+                };
+            }
+            out.push(u);
+        }
+        out
     }
 
     /// Reopen sessions that are due and ask the live ones for a sample.
@@ -653,6 +753,14 @@ fn wait_until(k: &KubeHandle, id: u64, timeout: Duration, cancellable: bool) -> 
     bail!("no answer from the API server in {} s", timeout.as_secs())
 }
 
+/// A CPU quantity from the pod spec: `500m`, `2`, `1.5`.
+fn cpu_quantity(q: &str) -> Option<f64> {
+    match q.strip_suffix('m') {
+        Some(m) => m.parse::<f64>().ok().map(|m| m / 1000.0),
+        None => q.parse().ok(),
+    }
+}
+
 fn uptime(text: &str) -> Option<f64> {
     text.split_whitespace().next()?.parse().ok()
 }
@@ -673,7 +781,9 @@ impl Collector for KubeCollector {
         // take them from one session instead of adding them up.
         let primary = self.sessions.iter().filter_map(|s| s.latest.as_ref()).max_by_key(|l| l.at);
         let Some(sample) = primary else {
-            return Snapshot { processes, ..Default::default() };
+            // Nothing read yet (or the container is restarting): the
+            // containers card still shows the spec and restarts.
+            return Snapshot { processes, containers: self.container_usage(), ..Default::default() };
         };
         let r = &sample.resp;
         let text = |n: &str| r.text(n).unwrap_or_default();
@@ -702,7 +812,8 @@ impl Collector for KubeCollector {
         };
         system.cpu = CpuInfo { model: format!("node {node}"), ..Default::default() };
         let up = uptime(&text("/proc/uptime"));
-        Snapshot { system, processes, clock: self.clock(up) }
+        let containers = self.container_usage();
+        Snapshot { system, processes, clock: self.clock(up), containers }
     }
 
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
@@ -894,6 +1005,8 @@ mod tests {
                 deadline: 3600,
                 replacing: None,
             }),
+            cg_prev: HashMap::new(),
+            cg_rates: HashMap::new(),
         }
     }
 

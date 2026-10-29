@@ -17,4 +17,4 @@ expression: screen
  │                                                                                                                              │
  │                                                                                                                              │
  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    Esc  pods    /  filter    C  container    t  tree    f
+  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    Esc  pods    L  lessons    /  filter    C  container

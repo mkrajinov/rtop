@@ -998,6 +998,54 @@ pub fn parse_diskstats(text: &str) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
+/// Counters from a cgroup v2 `cpu.stat`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CgroupCpuStat {
+    /// CPU time of every process in the cgroup, in microseconds.
+    pub usage_usec: u64,
+    /// Scheduler periods (100 ms by default) in which the cgroup ran.
+    pub nr_periods: u64,
+    /// Periods in which it used up its quota and had to wait.
+    pub nr_throttled: u64,
+    pub throttled_usec: u64,
+}
+
+pub fn cgroup_cpu_stat(text: &str) -> CgroupCpuStat {
+    let mut s = CgroupCpuStat::default();
+    for line in text.lines() {
+        let mut it = line.split_whitespace();
+        let (Some(k), Some(v)) = (it.next(), it.next().and_then(|v| v.parse().ok())) else { continue };
+        match k {
+            "usage_usec" => s.usage_usec = v,
+            "nr_periods" => s.nr_periods = v,
+            "nr_throttled" => s.nr_throttled = v,
+            "throttled_usec" => s.throttled_usec = v,
+            _ => {}
+        }
+    }
+    s
+}
+
+/// `cpu.max`: `<quota> <period>` in microseconds, as cores (`50000 100000`
+/// is 0.5); `max` means no limit.
+pub fn cgroup_cpu_max(text: &str) -> Option<f64> {
+    let mut it = text.split_whitespace();
+    let quota: f64 = it.next()?.parse().ok()?;
+    let period: f64 = it.next()?.parse().ok()?;
+    (period > 0.0).then(|| quota / period)
+}
+
+/// A byte count such as `memory.max`; `max` (no limit) is `None`.
+pub fn cgroup_bytes(text: &str) -> Option<u64> {
+    text.trim().parse().ok()
+}
+
+/// `oom_kill` from `memory.events`: processes the kernel killed because
+/// the cgroup reached `memory.max`.
+pub fn cgroup_oom_kills(text: &str) -> Option<u64> {
+    text.lines().find_map(|l| l.strip_prefix("oom_kill ")?.trim().parse().ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1134,5 +1182,22 @@ mod tests {
         assert!(!d.limits.is_empty());
         assert!(!d.regions.is_empty());
         assert!(d.kernel.sections.iter().any(|(n, f)| n == "Privileges & sandboxing" && !f.is_empty()));
+    }
+
+    /// Read in the `limited` demo pod on kind (500m, 256Mi, a busy loop).
+    #[test]
+    fn cgroup_files_from_kind() {
+        let stat = "usage_usec 9275512500\nuser_usec 9260235663\nsystem_usec 15276836\nnice_usec 0\nnr_periods 185714\nnr_throttled 184085\nthrottled_usec 4883032854\nnr_bursts 0\nburst_usec 0\n";
+        let s = cgroup_cpu_stat(stat);
+        assert_eq!(
+            (s.usage_usec, s.nr_periods, s.nr_throttled, s.throttled_usec),
+            (9275512500, 185714, 184085, 4883032854)
+        );
+        assert_eq!(cgroup_cpu_max("50000 100000\n"), Some(0.5));
+        assert_eq!(cgroup_cpu_max("max 100000\n"), None);
+        assert_eq!(cgroup_bytes("268435456\n"), Some(268435456));
+        assert_eq!(cgroup_bytes("max\n"), None);
+        let events = "low 0\nhigh 0\nmax 0\noom 2\noom_kill 1\noom_group_kill 0\n";
+        assert_eq!(cgroup_oom_kills(events), Some(1));
     }
 }

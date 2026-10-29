@@ -24,6 +24,18 @@ rtop_reader() {
 		cat "$1" 2>/dev/null
 		_e $?
 	}
+	# A text file as one frame, read with builtins (no fork per file).
+	_text() {
+		_f "$2"
+		rc=1
+		{
+			while IFS= read -r l; do
+				printf '%s\n' "$l"
+				rc=0
+			done <"$1"
+		} 2>/dev/null
+		_e $rc
+	}
 	# `L <name> <target>` for every symlink in a directory.
 	_links() {
 		for l in "$1"/*; do
@@ -52,7 +64,8 @@ rtop_reader() {
 	}
 
 	_snap() {
-		seq=$1
+		# The loop below reuses the positional parameters.
+		seq=$1 cgroot=${2:-}
 		for x in stat meminfo loadavg uptime; do
 			_file /proc/$x
 		done
@@ -79,6 +92,12 @@ rtop_reader() {
 			fi
 			printf '\036F p %s\n%s\n%s\n%s\n\036E 0\n' "${d#/proc/}" "$st" "$uid" "$n"
 		done
+		# The container's own cgroup: its usage against its limits.
+		if [ -n "$cgroot" ]; then
+			for x in cpu.max cpu.stat memory.current memory.max memory.peak memory.events; do
+				_text "$cgroot/$x" "cg $x"
+			done
+		fi
 		_d "$seq"
 	}
 
@@ -90,15 +109,7 @@ rtop_reader() {
 		# builtin read (no fork); argv may contain NULs, so it takes cat.
 		for p in "$@"; do
 			_file /proc/$p/cmdline
-			_f /proc/$p/cgroup
-			rc=1
-			{
-				while IFS= read -r l; do
-					printf '%s\n' "$l"
-					rc=0
-				done <"/proc/$p/cgroup"
-			} 2>/dev/null
-			_e $rc
+			_text /proc/$p/cgroup /proc/$p/cgroup
 		done
 		_d "$seq"
 	}
@@ -159,7 +170,7 @@ rtop_reader() {
 	_hello
 	while read -r req seq rest; do
 		case $req in
-		snap) _snap "$seq" ;;
+		snap) _snap "$seq" $rest ;;
 		cmd) _cmd "$seq" $rest ;;
 		details) _details "$seq" $rest ;;
 		kill) _kill "$seq" $rest ;;

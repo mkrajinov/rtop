@@ -10,7 +10,7 @@ use ratatui::widgets::Paragraph;
 use super::{panel, theme};
 use crate::app::App;
 use crate::fmt;
-use crate::model::{Battery, Fan, IoCounters, ProcState, Target};
+use crate::model::{Battery, ContainerUsage, Fan, IoCounters, ProcState, Target};
 
 /// Rows inside each card.
 const INNER: usize = 5;
@@ -31,7 +31,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     // Fixed-width text cards get a fixed width; graphs stretch to fill the
     // rest. Both rows share the column split so the cards line up.
     let columns = || Layout::horizontal([Constraint::Fill(2), Constraint::Fill(1), Constraint::Length(36)]).spacing(1);
-    let [top, bottom] = Layout::vertical([Constraint::Length(CARD), Constraint::Length(CARD)]).areas(area);
+    // One row of cards gets the whole area; splitting a single row's height
+    // between two rows squeezed the top cards to half their size.
+    let [top, bottom] = Layout::vertical([Constraint::Length(CARD), Constraint::Fill(1)]).areas(area);
+    if !app.snapshot.containers.is_empty() {
+        return draw_pod(f, app, top, bottom, area.height >= CARD * 2);
+    }
     let [cpu, mem, sys] = columns().areas(top);
     draw_cpu(f, app, cpu);
     draw_mem(f, app, mem);
@@ -58,6 +63,148 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         );
         draw_gpu(f, app, gpu);
     }
+}
+
+/// Pod mode: what the containers may use comes first. /proc/stat and
+/// /proc/meminfo describe the whole node, so the cpu and memory cards say
+/// "node" and move aside.
+fn draw_pod(f: &mut Frame, app: &App, top: Rect, bottom: Rect, two_rows: bool) {
+    let columns = || Layout::horizontal([Constraint::Fill(2), Constraint::Fill(1), Constraint::Length(36)]).spacing(1);
+    let [containers, mem, sys] = columns().areas(top);
+    draw_containers(f, &app.snapshot.containers, containers);
+    draw_mem(f, app, mem);
+    draw_sys(f, app, sys);
+    if two_rows {
+        let p = theme::pal();
+        let [net, cpu] = Layout::horizontal([Constraint::Fill(2), Constraint::Fill(1)]).spacing(1).areas(bottom);
+        let s = &app.snapshot.system;
+        draw_io(f, net, "network", s.net.as_ref(), &app.net_hist, [("↓ in", p.code), ("↑ out", p.zombie)], None);
+        draw_cpu(f, app, cpu);
+    }
+}
+
+/// `0.49 / 0.5` cores, or `0.49 · no limit`.
+fn cores(used: Option<f64>, limit: Option<f64>) -> String {
+    let used = used.map_or("…".into(), |c| format!("{c:.2}"));
+    match limit {
+        Some(l) => format!("{used} / {}", trim_num(l)),
+        None => format!("{used} · no limit"),
+    }
+}
+
+/// `↻ 2 last OOMKilled`: restarts and why the container last ended.
+fn restarts(spans: &mut Vec<Span<'static>>, c: &ContainerUsage) {
+    let p = theme::pal();
+    spans.push(Span::styled(
+        format!("↻ {}", c.restarts),
+        if c.restarts > 0 { Style::default().fg(p.warn) } else { theme::faint() },
+    ));
+    // OOMKilled is the one to notice.
+    if let Some(why) = c.last_termination.as_deref().and_then(termination_reason) {
+        let style = if why == "OOMKilled" { Style::default().fg(p.bad) } else { theme::dim() };
+        spans.push(Span::styled(format!(" last {why}"), style));
+    }
+}
+
+/// `terminated: OOMKilled (exit 137)` → `OOMKilled`.
+fn termination_reason(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix("terminated: ")?;
+    Some(rest.split(" (").next().unwrap_or(rest))
+}
+
+/// A usage bar against a limit; without a limit there is nothing to fill.
+fn bar_or_gap(spans: &mut Vec<Span<'static>>, width: usize, pct: Option<f32>) {
+    if width == 0 {
+        return;
+    }
+    match pct {
+        Some(p) => spans.extend(bar(width, p)),
+        None => spans.push(Span::raw(" ".repeat(width))),
+    }
+    spans.push(Span::raw(" "));
+}
+
+fn trim_num(v: f64) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// One row per container: CPU and memory against the cgroup's limits,
+/// throttling, OOM kills and restarts (User Story 4).
+fn draw_containers(f: &mut Frame, list: &[ContainerUsage], area: Rect) {
+    let p = theme::pal();
+    let block = panel("containers")
+        .title_top(Line::from(Span::styled(" cgroup: cpu.stat cpu.max memory.* ", theme::dim())).right_aligned());
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let w = inner.width as usize;
+    let name_w = list.iter().map(|c| c.name.chars().count()).max().unwrap_or(0).clamp(3, 16);
+    // Bars only when there is room for them.
+    let bar_w = if w >= name_w + 98 { 6 } else { 0 };
+    let shown = INNER.min(list.len());
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, c) in list.iter().enumerate().take(shown) {
+        if i == INNER - 1 && list.len() > INNER {
+            lines.push(Line::from(Span::styled(format!("+{} more containers", list.len() - i), theme::dim())));
+            break;
+        }
+        let name: String = c.name.chars().take(name_w).collect();
+        let mut spans = vec![Span::styled(format!("{name:<name_w$}  "), Style::default().fg(p.code))];
+        if c.unreadable {
+            // Only the pod spec is known: show its limits and why.
+            let cpu = c.cpu_limit.map_or("none".into(), trim_num);
+            let mem = c.mem_max.map_or("none".into(), fmt::bytes);
+            spans.push(Span::styled(format!("limits cpu {cpu} mem {mem}  "), theme::dim()));
+            restarts(&mut spans, c);
+            spans.push(Span::styled(format!("  {}", c.source), theme::faint()));
+            lines.push(Line::from(spans));
+            continue;
+        }
+        let cpu_pct = match (c.cpu_cores, c.cpu_limit) {
+            (Some(u), Some(l)) if l > 0.0 => Some((u / l * 100.0) as f32),
+            _ => None,
+        };
+        spans.push(Span::styled("cpu ", theme::dim()));
+        bar_or_gap(&mut spans, bar_w, cpu_pct);
+        spans.push(Span::styled(format!("{:<15}", cores(c.cpu_cores, c.cpu_limit)), theme::text()));
+        // Throttling only means something under a quota.
+        match (c.cpu_limit, c.throttled_pct) {
+            (Some(_), Some(t)) => spans.push(Span::styled(
+                format!("thr {:>3.0}% ", t),
+                if t >= 1.0 { Style::default().fg(theme::level(t as f32)) } else { theme::faint() },
+            )),
+            (Some(_), None) => spans.push(Span::styled("thr   … ", theme::faint())),
+            (None, _) => spans.push(Span::raw(" ".repeat(9))),
+        }
+        let mem_pct = match (c.mem_current, c.mem_max) {
+            (Some(u), Some(m)) if m > 0 => Some(u as f32 / m as f32 * 100.0),
+            _ => None,
+        };
+        spans.push(Span::styled("mem ", theme::dim()));
+        bar_or_gap(&mut spans, bar_w, mem_pct);
+        let used = c.mem_current.map_or("…".into(), fmt::bytes);
+        let mem = match c.mem_max {
+            Some(m) => format!("{used} / {}", fmt::bytes(m)),
+            None => format!("{used} · no limit"),
+        };
+        spans.push(Span::styled(format!("{mem:<15}  "), theme::text()));
+        let oom = c.oom_kills.unwrap_or(0);
+        spans.push(Span::styled(
+            format!("oom {oom}  "),
+            if oom > 0 { Style::default().fg(p.bad).add_modifier(Modifier::BOLD) } else { theme::faint() },
+        ));
+        restarts(&mut spans, c);
+        lines.push(Line::from(spans));
+    }
+    // Room left: the lesson this card is about.
+    if lines.len() < INNER {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "limits are the cgroup's; the memory and cpu cards show the whole node",
+            theme::faint(),
+        )));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -356,7 +503,8 @@ fn draw_mem(f: &mut Frame, app: &App, area: Rect) {
     let sys = &app.snapshot.system;
     let pct = |a: u64, b: u64| if b == 0 { 0.0 } else { a as f32 / b as f32 * 100.0 };
     let (mp, sp) = (pct(sys.mem_used, sys.mem_total), pct(sys.swap_used, sys.swap_total));
-    let block = panel("memory")
+    let title = if app.snapshot.containers.is_empty() { "memory" } else { "memory · node" };
+    let block = panel(title)
         .title_top(Line::from(Span::styled(format!(" {} ", fmt::bytes(sys.mem_total)), theme::dim())).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);

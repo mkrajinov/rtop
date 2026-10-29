@@ -99,9 +99,12 @@ with `helper pod rejected by admission in <ns>: … violates PodSecurity …` an
 ## 6. Container dashboard (Story 4, SC-006)
 
 `rtop k8s --context kind-rtop --pod rtop-demo/limited` shows:
-- memory as `used / 256Mi`;
-- CPU against `500m`, with throttled periods increasing;
-- an explain entry for memory that says `/proc/meminfo` shows the node's memory.
+- a containers card first: `app  cpu 0.50 / 0.5  thr 100%  mem 2.6M / 256M  oom 0  ↻ 0`;
+- the memory card titled `memory · node`, and the node's CPU card in the second row;
+- `L` opens the first lesson, `container_meminfo`: `/proc/meminfo` in a container shows the node.
+
+`rtop k8s --context kind-rtop --pod rtop-demo/oom` (48Mi, grows 1 MiB/s) shows memory rising to
+the limit, then `↻ N last OOMKilled` after each restart.
 
 ## 7. Failures (FR-012, SC-005)
 
