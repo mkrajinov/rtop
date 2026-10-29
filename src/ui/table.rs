@@ -40,10 +40,11 @@ fn command_spans(cmdline: &str, name: &str, show_path: bool) -> Vec<Span<'static
     v
 }
 
-fn width(c: Column) -> Constraint {
+/// `container`: width of the longest container name on screen.
+fn width(c: Column, container: u16) -> Constraint {
     match c {
         Column::Pid => Constraint::Length(7),
-        Column::Container => Constraint::Length(12),
+        Column::Container => Constraint::Length(container),
         Column::User => Constraint::Length(12),
         Column::State => Constraint::Length(2),
         Column::Pri | Column::Nice => Constraint::Length(4),
@@ -73,8 +74,8 @@ fn is_numeric(c: Column) -> bool {
     !matches!(c, Column::Container | Column::User | Column::State | Column::Command)
 }
 
-fn min_width(c: Column) -> u16 {
-    match width(c) {
+fn min_width(c: Column, container: u16) -> u16 {
+    match width(c, container) {
         Constraint::Length(n) | Constraint::Min(n) => n + 2,
         _ => 0,
     }
@@ -82,11 +83,11 @@ fn min_width(c: Column) -> u16 {
 
 /// Drop the least essential columns until the rest fit, so narrow terminals
 /// (or an open explain panel) never truncate PIDs.
-fn visible_columns(mut cols: Vec<Column>, avail: u16) -> Vec<Column> {
+fn visible_columns(mut cols: Vec<Column>, avail: u16, container: u16) -> Vec<Column> {
     const DROP_ORDER: [Column; 6] =
         [Column::Pri, Column::Vsz, Column::Time, Column::Fds, Column::Threads, Column::User];
     for drop in DROP_ORDER {
-        if cols.iter().map(|&c| min_width(c)).sum::<u16>() <= avail {
+        if cols.iter().map(|&c| min_width(c, container)).sum::<u16>() <= avail {
             break;
         }
         cols.retain(|&c| c != drop);
@@ -95,7 +96,10 @@ fn visible_columns(mut cols: Vec<Column>, avail: u16) -> Vec<Column> {
 }
 
 pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
-    let cols = visible_columns(app.columns(), area.width.saturating_sub(2));
+    // Container names such as `rtop-sb-shard-140-1a2b3` must not be cut.
+    let container = app.snapshot.processes.iter().map(|p| crate::app::container(p).chars().count()).max().unwrap_or(0);
+    let container = (container as u16).clamp(9, 40);
+    let cols = visible_columns(app.columns(), area.width.saturating_sub(2), container);
     let header = Row::new(cols.iter().map(|&c| {
         let arrow = if c == app.sort { if app.sort_desc { "▼" } else { "▲" } } else { "" };
         let mut style = Style::default().fg(theme::pal().dim);
@@ -214,7 +218,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
     if let Some(lab) = &app.lab {
         title.push_str(&format!(" · lab '{}' process group {}", lab.lab.name, lab.pgid));
     }
-    let table = Table::new(rows, cols.iter().map(|&c| width(c)))
+    let table = Table::new(rows, cols.iter().map(|&c| width(c, container)))
         .header(header)
         .block(panel(&title))
         .column_spacing(2)

@@ -205,3 +205,26 @@ fn k8s_picker_lists_namespaces_and_pods() {
     assert!(screen.contains("ImagePullBackOff"), "{screen}");
     insta::assert_snapshot!(screen);
 }
+
+#[test]
+fn long_container_names_are_not_cut() {
+    use rtop::collector::fixture::process;
+    use rtop::model::{Origin, Target};
+    let mut c = FixtureCollector::default();
+    c.snapshot.processes.clear();
+    let mut p = process(1, 0, "sleep");
+    p.space = 1;
+    p.origin = Some(Origin { pod: None, container: "rtop-sb-shard-140-1a2b3".into() });
+    c.snapshot.processes.push(p);
+    c.target = Some(Target::Pod {
+        context: "kind-rtop".into(),
+        namespace: "rtop-demo".into(),
+        pod: "sb".into(),
+        node: None,
+        container: None,
+    });
+    let mut app = App::new(Box::new(c));
+    app.refresh();
+    let screen = render(&mut app, 130, 16);
+    assert!(screen.contains("rtop-sb-shard-140-1a2b3 "), "{screen}");
+}
