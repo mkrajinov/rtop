@@ -589,31 +589,11 @@ fn node_detail(info: &NodeInfo, pods: usize) -> String {
     if let Some(cpu) = info.allocatable.get("cpu") {
         parts.push(format!("{cpu} cpu"));
     }
-    if let Some(mem) = info.allocatable.get("memory").and_then(|m| quantity_bytes(m)) {
+    if let Some(mem) = info.allocatable.get("memory").and_then(|m| crate::fmt::quantity_bytes(m)) {
         parts.push(crate::fmt::bytes(mem));
     }
     let alloc = if parts.is_empty() { String::new() } else { format!("allocatable {} · ", parts.join(" ")) };
     format!("{alloc}{pods} pods")
-}
-
-/// `16Gi`, `1024Ki`, `2G`, `123456` → bytes.
-fn quantity_bytes(q: &str) -> Option<u64> {
-    let split = q.find(|c: char| !c.is_ascii_digit()).unwrap_or(q.len());
-    let (n, unit) = q.split_at(split);
-    let n: u64 = n.parse().ok()?;
-    let mul: u64 = match unit {
-        "" => 1,
-        "Ki" => 1 << 10,
-        "Mi" => 1 << 20,
-        "Gi" => 1 << 30,
-        "Ti" => 1 << 40,
-        "k" => 1_000,
-        "M" => 1_000_000,
-        "G" => 1_000_000_000,
-        "T" => 1_000_000_000_000,
-        _ => return None,
-    };
-    Some(n * mul)
 }
 
 impl Drop for KubeCollector {

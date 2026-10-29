@@ -241,8 +241,17 @@ pub struct PodSummary {
 pub struct NodeSummary {
     pub name: String,
     pub ready: bool,
+    /// From `node-role.kubernetes.io/<role>` labels.
     pub roles: Vec<String>,
-    pub pods: usize,
+    /// Unix seconds.
+    pub created: Option<i64>,
+    /// kubelet version.
+    pub version: String,
+    /// Allocatable CPU and memory as quantities (`8`, `31Gi`).
+    pub cpu: Option<String>,
+    pub memory: Option<String>,
+    /// Cordoned (`spec.unschedulable`).
+    pub unschedulable: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

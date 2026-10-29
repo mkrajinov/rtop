@@ -19,7 +19,7 @@ exactly one `Reply` with that id follows.
 | `GetPod { ns, name }` | `PodInfo` | |
 | `ListNamespaces` | `Namespaces(Vec<String>)`, sorted | picker; `Forbidden` for namespace-scoped users, the picker then falls back to the context's namespace |
 | `ListPods { ns }` | `Vec<PodSummary>`, sorted by namespace and name | picker; `ns` empty lists all namespaces |
-| `ListNodes` | `Vec<NodeSummary>` | picker |
+| `ListNodes` | `Vec<NodeSummary>`, sorted by name | picker, from the watch cache |
 | `GetNode { name }` | `NodeInfo` (allocatable, pod count, Ready) | |
 | `WatchPod { ns, name }` | `()` | then `Event::Pod(PodInfo)` on every change, and `Event::PodDeleted` |
 | `WatchNodePods { node }` | `()` | then `Event::NodeIndex(NodeIndex)`, debounced 1 s |
@@ -69,7 +69,7 @@ values map to FR-012 messages:
 - `NodeIndex { pods: HashMap<Uid, (ns, name)>, containers: HashMap<ContainerId, (Uid, name)> }`
 - `PodSummary { ns, name, phase, reason, node, containers, ready, restarts, created }`
   (`phase` is `Terminating` when the pod has a deletion timestamp, as in `kubectl get pods`)
-- `NodeSummary { name, ready, roles, pods }`
+- `NodeSummary { name, ready, roles, created, version, cpu, memory, unschedulable }`
 
 The kube thread converts `k8s_openapi` types into these shapes with pure functions
 (`src/kube/convert.rs`). Those functions are tested against JSON fixtures in

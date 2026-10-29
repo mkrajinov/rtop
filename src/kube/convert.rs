@@ -3,7 +3,7 @@
 
 use k8s_openapi::api::core::v1::{ContainerState, Node, Pod};
 
-use super::msg::{ContainerInfo, EphemeralInfo, NodeIndex, NodeInfo, PodInfo, PodSummary, Resources};
+use super::msg::{ContainerInfo, EphemeralInfo, NodeIndex, NodeInfo, NodeSummary, PodInfo, PodSummary, Resources};
 
 pub fn pod_info(pod: &Pod) -> PodInfo {
     let meta = &pod.metadata;
@@ -128,6 +128,37 @@ pub fn node_info(node: &Node) -> NodeInfo {
     NodeInfo { name: node.metadata.name.clone().unwrap_or_default(), ready, allocatable, pods: 0 }
 }
 
+/// One picker row for a node, like `kubectl get nodes`.
+pub fn node_summary(node: &Node) -> NodeSummary {
+    let info = node_info(node);
+    let mut roles: Vec<String> = node
+        .metadata
+        .labels
+        .iter()
+        .flatten()
+        .filter_map(|(k, _)| k.strip_prefix("node-role.kubernetes.io/"))
+        .filter(|r| !r.is_empty())
+        .map(String::from)
+        .collect();
+    roles.sort();
+    let spec = node.spec.as_ref();
+    NodeSummary {
+        roles,
+        created: node.metadata.creation_timestamp.as_ref().map(|t| t.0.as_second()),
+        version: node
+            .status
+            .as_ref()
+            .and_then(|s| s.node_info.as_ref())
+            .map(|i| i.kubelet_version.clone())
+            .unwrap_or_default(),
+        cpu: info.allocatable.get("cpu").cloned(),
+        memory: info.allocatable.get("memory").cloned(),
+        unschedulable: spec.and_then(|s| s.unschedulable).unwrap_or(false),
+        name: info.name,
+        ready: info.ready,
+    }
+}
+
 /// `containerd://abc…` → `abc…`: the ID as it appears in cgroup paths.
 fn strip_runtime(id: &str) -> String {
     id.split_once("://").map_or(id, |(_, rest)| rest).to_string()
@@ -190,6 +221,18 @@ mod tests {
         let i = node_info(&n);
         assert!(i.ready && i.name == "rtop-control-plane");
         assert!(i.allocatable.contains_key("cpu") && i.allocatable.contains_key("memory"));
+    }
+
+    #[test]
+    fn node_picker_row() {
+        let path = format!("{}/tests/fixtures/kube/node.json", env!("CARGO_MANIFEST_DIR"));
+        let n: Node = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let s = node_summary(&n);
+        assert_eq!(
+            (s.name.as_str(), s.ready, s.roles.as_slice()),
+            ("rtop-control-plane", true, &["control-plane".to_string()][..])
+        );
+        assert!(s.version.starts_with("v1.") && s.cpu.is_some() && s.created.is_some());
     }
 
     #[test]

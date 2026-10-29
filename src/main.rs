@@ -52,7 +52,7 @@ struct K8sArgs {
     #[arg(long, value_name = "NODE", conflicts_with = "pod")]
     node: Option<String>,
     /// Namespace for the node helper pod; it must allow hostPID [default: --namespace, else the context's].
-    #[arg(long, value_name = "NAMESPACE", requires = "node")]
+    #[arg(long, value_name = "NAMESPACE")]
     helper_namespace: Option<String>,
     /// Namespace of --pod, or the one the picker starts in [default: the context's namespace].
     #[arg(short = 'n', long)]
@@ -194,19 +194,16 @@ fn k8s(args: K8sArgs, tick: Duration) -> anyhow::Result<()> {
         None => (args.namespace.clone(), None),
     };
     let mut picker = Picker::connect(args.context.clone(), pod_ns.clone())?;
+    // Where a node's helper pod goes: --helper-namespace, else -n, else
+    // the context's namespace.
+    if let Some(ns) = &args.helper_namespace {
+        picker.helper_ns.clone_from(ns);
+    }
     let first = match (pod, &args.node) {
         (Some(pod), _) => Some(KubeCollector::connect(pod_options(&args, &picker, picker.ns.clone(), pod, tick))?),
         (None, Some(node)) => {
-            let ns = args.helper_namespace.clone().unwrap_or_else(|| picker.ns.clone());
-            eprintln!("starting a helper pod in {} / namespace {ns} on node {node} …", picker.context);
-            let opened = KubeCollector::connect_node(collector::kube::NodeOptions {
-                context: Some(picker.context.clone()),
-                implicit_context: picker.implicit_context,
-                node: node.clone(),
-                helper_namespace: Some(ns),
-                tick,
-                image: args.debug_image.clone(),
-            });
+            eprintln!("starting a helper pod in {} / namespace {} on node {node} …", picker.context, picker.helper_ns);
+            let opened = KubeCollector::connect_node(node_options(&args, &picker, node.clone(), tick));
             print_leftovers();
             Some(opened?)
         }
@@ -227,6 +224,24 @@ fn print_leftovers() {
     let cmds = std::mem::take(&mut *collector::kube::LEFTOVER.lock().unwrap_or_else(|e| e.into_inner()));
     for cmd in cmds {
         eprintln!("rtop could not delete its helper pod; remove it with: {cmd}");
+    }
+}
+
+/// The node view, with its helper pod in `picker.helper_ns`.
+#[cfg(feature = "kube")]
+fn node_options(
+    args: &K8sArgs,
+    picker: &rtop::picker::Picker,
+    node: String,
+    tick: Duration,
+) -> collector::kube::NodeOptions {
+    collector::kube::NodeOptions {
+        context: Some(picker.context.clone()),
+        implicit_context: picker.implicit_context,
+        node,
+        helper_namespace: Some(picker.helper_ns.clone()),
+        tick,
+        image: args.debug_image.clone(),
     }
 }
 
@@ -280,13 +295,55 @@ fn k8s_loop(
         if !app.back {
             return Ok(());
         }
-        if let Some(rtop::model::Target::Pod { namespace, pod, .. }) = app.collector.target() {
-            picker.came_back(namespace, pod);
+        match app.collector.target() {
+            Some(rtop::model::Target::Pod { namespace, pod, .. }) => picker.came_back(namespace, pod),
+            Some(rtop::model::Target::Node { node, .. }) => picker.came_back_from_node(node),
+            None => {}
         }
     }
 }
 
-/// Run the picker until a pod view is open (`None`: quit).
+/// A view being opened on a thread while the picker keeps drawing.
+#[cfg(feature = "kube")]
+struct Opening {
+    rx: std::sync::mpsc::Receiver<anyhow::Result<collector::kube::KubeCollector>>,
+    thread: std::thread::JoinHandle<()>,
+    /// A node: the thread may have created a helper pod.
+    node: bool,
+}
+
+#[cfg(feature = "kube")]
+impl Opening {
+    fn start(
+        node: bool,
+        open: impl FnOnce() -> anyhow::Result<collector::kube::KubeCollector> + Send + 'static,
+    ) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let _ = tx.send(open());
+        });
+        Opening { rx, thread, node }
+    }
+
+    /// Give up on it. A node's helper pod must not outlive this: stop the
+    /// thread's waits and let it delete what it created (the collector it
+    /// may already have built deletes its helper when dropped).
+    fn abandon(self, terminal: &mut ratatui::DefaultTerminal, picker: &mut rtop::picker::Picker) {
+        if !self.node {
+            return;
+        }
+        picker.connecting = Some("… removing the helper pod".into());
+        let _ = terminal.draw(|f| ui::picker::draw(f, picker));
+        let signalled = QUIT.load(Ordering::Relaxed);
+        collector::kube::CANCEL.store(true, Ordering::Relaxed);
+        drop(self.rx.recv());
+        let _ = self.thread.join();
+        collector::kube::CANCEL.store(signalled, Ordering::Relaxed);
+        picker.connecting = None;
+    }
+}
+
+/// Run the picker until a view is open (`None`: quit).
 #[cfg(feature = "kube")]
 fn pick(
     terminal: &mut ratatui::DefaultTerminal,
@@ -300,11 +357,14 @@ fn pick(
     use crossterm::event::KeyCode;
     use rtop::picker::Action;
 
-    let mut opening: Option<mpsc::Receiver<anyhow::Result<KubeCollector>>> = None;
-    while !QUIT.load(Ordering::Relaxed) {
+    let mut opening: Option<Opening> = None;
+    let result = loop {
+        if QUIT.load(Ordering::Relaxed) {
+            break None;
+        }
         picker.tick();
-        if let Some(rx) = &opening {
-            match rx.try_recv() {
+        if let Some(o) = &opening {
+            match o.rx.try_recv() {
                 Ok(Ok(c)) => {
                     picker.connecting = None;
                     return Ok(Some(c));
@@ -317,7 +377,7 @@ fn pick(
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => {
                     picker.connecting = None;
-                    picker.set_status("opening the pod failed");
+                    picker.set_status("opening the view failed");
                     opening = None;
                 }
             }
@@ -330,29 +390,33 @@ fn pick(
         if key.kind != KeyEventKind::Press {
             continue;
         }
-        if opening.is_some() && key.code == KeyCode::Esc {
-            // The thread finishes on its own; what it opened is dropped,
-            // which closes its readers.
-            opening = None;
+        if key.code == KeyCode::Esc
+            && let Some(o) = opening.take()
+        {
+            o.abandon(terminal, picker);
             picker.connecting = None;
             picker.set_status("cancelled");
             continue;
         }
         match picker.handle_key(key) {
-            Action::Quit => return Ok(None),
+            Action::Quit => break None,
             Action::Open { ns, pod } => {
                 picker.connecting = Some(format!("{ns}/{pod}"));
                 let opts = pod_options(args, picker, ns, pod, tick);
-                let (tx, rx) = mpsc::channel();
-                std::thread::spawn(move || {
-                    let _ = tx.send(KubeCollector::connect(opts));
-                });
-                opening = Some(rx);
+                opening = Some(Opening::start(false, move || KubeCollector::connect(opts)));
+            }
+            Action::OpenNode { node } => {
+                picker.connecting = Some(format!("node {node} (creating the helper pod)"));
+                let opts = node_options(args, picker, node, tick);
+                opening = Some(Opening::start(true, move || KubeCollector::connect_node(opts)));
             }
             Action::None => {}
         }
+    };
+    if let Some(o) = opening {
+        o.abandon(terminal, picker);
     }
-    Ok(None)
+    Ok(result)
 }
 
 #[cfg(not(feature = "kube"))]
@@ -414,6 +478,7 @@ mod tests {
         assert!(parse("rtop k8s -c app").is_err());
         assert!(parse("rtop k8s --node n1 --helper-namespace rtop-demo").is_ok());
         assert!(parse("rtop k8s --node n1 --pod x").is_err());
-        assert!(parse("rtop k8s --helper-namespace x").is_err());
+        // Also for nodes opened from the picker.
+        assert!(parse("rtop k8s --helper-namespace x").is_ok());
     }
 }

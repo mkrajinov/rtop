@@ -1,5 +1,8 @@
-//! `rtop k8s` without `--pod`: choose a namespace and a pod, then open the
-//! pod view (User Story 3).
+//! `rtop k8s` without `--pod`: choose a namespace and a pod, or a node,
+//! then open its view (User Story 3).
+//!
+//! Opening a node creates a privileged helper pod on it, so that takes a
+//! second key that names the namespace it goes to.
 //!
 //! Like the pod view, the picker never waits on the cluster: list requests
 //! go to the kube thread and their replies are picked up on each tick.
@@ -11,7 +14,7 @@ use anyhow::bail;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::kube::KubeHandle;
-use crate::kube::msg::{ErrorCode, Incoming, PodSummary, Reply, Request};
+use crate::kube::msg::{ErrorCode, Incoming, NodeSummary, PodSummary, Reply, Request};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
@@ -24,6 +27,7 @@ pub enum Pane {
 pub enum Action {
     None,
     Open { ns: String, pod: String },
+    OpenNode { node: String },
     Quit,
 }
 
@@ -31,7 +35,12 @@ pub enum Action {
 enum Pending {
     Namespaces,
     Pods,
+    Nodes,
 }
+
+/// The entry of the namespace pane that lists nodes instead of pods. It
+/// cannot clash with a namespace name, which is a DNS label.
+pub const NODES: &str = "\u{1}nodes";
 
 /// Pod lists are fetched again this often while the picker is shown;
 /// every pod of a large cluster only rarely (`r` lists at once).
@@ -44,7 +53,8 @@ pub struct Picker {
     /// The context came from the kubeconfig, not from `--context`.
     pub implicit_context: bool,
     pub server: String,
-    /// `""` stands for all namespaces and is always the first entry.
+    /// `""` stands for all namespaces and [`NODES`] for the nodes; both
+    /// always come first.
     pub namespaces: Vec<String>,
     /// Why the namespace list is incomplete, e.g. listing is forbidden.
     pub ns_note: Option<String>,
@@ -52,6 +62,13 @@ pub struct Picker {
     pub ns: String,
     /// `None` until the first answer for `ns` arrives.
     pub pods: Option<Result<Vec<PodSummary>, String>>,
+    /// The node list, when [`NODES`] is selected.
+    pub nodes: Option<Result<Vec<NodeSummary>, String>>,
+    /// Where a node's helper pod would be created (`--helper-namespace`,
+    /// else the context's namespace).
+    pub helper_ns: String,
+    /// A node waiting for the user to confirm its helper pod.
+    pub confirm: Option<String>,
     pub focus: Pane,
     pub ns_sel: usize,
     pub pod_sel: usize,
@@ -104,12 +121,15 @@ impl Picker {
             context: context.into(),
             implicit_context,
             server: server.into(),
-            namespaces: vec![String::new(), ns.to_string()],
+            namespaces: vec![String::new(), NODES.into(), ns.to_string()],
             ns_note: None,
             ns: ns.into(),
             pods: None,
+            nodes: None,
+            helper_ns: ns.into(),
+            confirm: None,
             focus: Pane::Pods,
-            ns_sel: 1,
+            ns_sel: 2,
             pod_sel: 0,
             ns_filter: String::new(),
             pod_filter: String::new(),
@@ -131,9 +151,25 @@ impl Picker {
         id
     }
 
+    /// The pods of the selected namespace, or the nodes.
     fn list_pods(&mut self) {
-        self.pods_req = self.request(Request::ListPods { ns: self.ns.clone() }, Pending::Pods);
+        self.pods_req = if self.ns == NODES {
+            self.request(Request::ListNodes, Pending::Nodes)
+        } else {
+            self.request(Request::ListPods { ns: self.ns.clone() }, Pending::Pods)
+        };
         self.listed = Some(Instant::now());
+    }
+
+    /// Back from the view of a node: the node list with it selected.
+    pub fn came_back_from_node(&mut self, node: &str) {
+        self.want = Some((NODES.into(), node.to_string()));
+        if self.ns == NODES {
+            self.list_pods();
+        } else {
+            self.ns_sel = self.visible_namespaces().iter().position(|n| *n == NODES).unwrap_or(self.ns_sel);
+            self.show_namespace(NODES.into());
+        }
     }
 
     /// Back from the pod view of `ns/pod`: show its namespace with it
@@ -155,6 +191,11 @@ impl Picker {
                 match self.pending.remove(&id) {
                     Some(Pending::Namespaces) => self.got_namespaces(reply),
                     Some(Pending::Pods) if id == self.pods_req => self.got_pods(reply),
+                    Some(Pending::Nodes) if id == self.pods_req => match reply {
+                        Reply::Nodes(n) => self.set_nodes(Ok(n)),
+                        Reply::Err(e) => self.set_nodes(Err(e.to_string())),
+                        _ => {}
+                    },
                     _ => {}
                 }
             }
@@ -171,7 +212,7 @@ impl Picker {
             names.push(self.ns.clone());
             names.sort();
         }
-        names.insert(0, String::new());
+        names.splice(0..0, [String::new(), NODES.into()]);
         self.namespaces = names;
         self.ns_sel = self.visible_namespaces().iter().position(|n| **n == self.ns).unwrap_or(0);
     }
@@ -200,6 +241,37 @@ impl Picker {
         self.pod_sel = self.pod_sel.min(self.visible_pods().len().saturating_sub(1));
     }
 
+    pub fn set_nodes(&mut self, nodes: Result<Vec<NodeSummary>, String>) {
+        let keep = self.want.take().map(|w| w.1).or_else(|| self.selected_node().map(|n| n.name.clone()));
+        self.nodes = Some(nodes);
+        if let Some(name) = keep {
+            self.pod_sel = self.visible_nodes().iter().position(|n| n.name == name).unwrap_or(self.pod_sel);
+        }
+        self.pod_sel = self.pod_sel.min(self.visible_nodes().len().saturating_sub(1));
+    }
+
+    pub fn visible_nodes(&self) -> Vec<&NodeSummary> {
+        let f = self.pod_filter.to_lowercase();
+        match &self.nodes {
+            Some(Ok(n)) => n.iter().filter(|n| n.name.to_lowercase().contains(&f)).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn selected_node(&self) -> Option<&NodeSummary> {
+        self.visible_nodes().get(self.pod_sel).copied()
+    }
+
+    /// The right pane lists nodes rather than pods.
+    pub fn showing_nodes(&self) -> bool {
+        self.ns == NODES
+    }
+
+    /// Rows in the right pane.
+    fn right_len(&self) -> usize {
+        if self.showing_nodes() { self.visible_nodes().len() } else { self.visible_pods().len() }
+    }
+
     fn got_pods(&mut self, reply: Reply) {
         match reply {
             Reply::Pods(p) => self.set_pods(Ok(p)),
@@ -210,7 +282,7 @@ impl Picker {
 
     pub fn visible_namespaces(&self) -> Vec<&String> {
         let f = self.ns_filter.to_lowercase();
-        self.namespaces.iter().filter(|n| n.is_empty() || n.to_lowercase().contains(&f)).collect()
+        self.namespaces.iter().filter(|n| n.is_empty() || *n == NODES || n.to_lowercase().contains(&f)).collect()
     }
 
     pub fn visible_pods(&self) -> Vec<&PodSummary> {
@@ -231,6 +303,7 @@ impl Picker {
         }
         self.ns = ns;
         self.pods = None;
+        self.nodes = None;
         self.pod_sel = 0;
         self.list_pods();
     }
@@ -250,13 +323,20 @@ impl Picker {
         if self.connecting.is_some() {
             return Action::None;
         }
+        if let Some(node) = self.confirm.take() {
+            if key.code == KeyCode::Char('y') {
+                return Action::OpenNode { node };
+            }
+            self.set_status("cancelled: no helper pod was created");
+            return Action::None;
+        }
         if self.filtering {
             self.key_filter(key);
             return Action::None;
         }
         let len = match self.focus {
             Pane::Namespaces => self.visible_namespaces().len(),
-            Pane::Pods => self.visible_pods().len(),
+            Pane::Pods => self.right_len(),
         };
         let sel = match self.focus {
             Pane::Namespaces => self.ns_sel,
@@ -311,9 +391,9 @@ impl Picker {
                 self.filtering = false;
                 // A namespace nobody may list can still be typed in full.
                 let typed = self.ns_filter.trim().to_string();
-                if self.focus == Pane::Namespaces && !typed.is_empty() && self.visible_namespaces().len() == 1 {
+                if self.focus == Pane::Namespaces && !typed.is_empty() && self.visible_namespaces().len() == 2 {
                     self.namespaces.push(typed.clone());
-                    self.ns_sel = 1;
+                    self.ns_sel = 2;
                     self.show_namespace(typed);
                     self.focus = Pane::Pods;
                 }
@@ -336,7 +416,7 @@ impl Picker {
     fn clamp(&mut self) {
         match self.focus {
             Pane::Namespaces => self.select(self.ns_sel.min(self.visible_namespaces().len().saturating_sub(1))),
-            Pane::Pods => self.pod_sel = self.pod_sel.min(self.visible_pods().len().saturating_sub(1)),
+            Pane::Pods => self.pod_sel = self.pod_sel.min(self.right_len().saturating_sub(1)),
         }
     }
 
@@ -352,8 +432,19 @@ impl Picker {
         }
     }
 
-    /// Open the selected pod, or say why it cannot be opened.
+    /// Open the selected pod, or say why it cannot be opened. A node only
+    /// asks for confirmation here.
     fn open(&mut self) -> Action {
+        if self.showing_nodes() {
+            let Some(n) = self.selected_node() else { return Action::None };
+            if !n.ready {
+                let msg = format!("node {} is NotReady: a helper pod could not run there", n.name);
+                self.set_status(msg);
+            } else {
+                self.confirm = Some(n.name.clone());
+            }
+            return Action::None;
+        }
         let Some(p) = self.selected_pod() else { return Action::None };
         if p.phase != "Running" {
             let why = p.reason.clone().unwrap_or_else(|| "it has no running containers".into());
@@ -407,9 +498,29 @@ mod tests {
     }
 
     #[test]
+    fn a_node_opens_only_after_confirmation() {
+        let mut p = picker();
+        p.came_back_from_node("worker-2");
+        assert!(p.showing_nodes());
+        let node = |name: &str, ready| NodeSummary { name: name.into(), ready, ..Default::default() };
+        p.set_nodes(Ok(vec![node("worker-1", true), node("worker-2", true), node("worker-3", false)]));
+        assert_eq!(p.selected_node().unwrap().name, "worker-2");
+        assert_eq!(press(&mut p, KeyCode::Enter), Action::None);
+        assert_eq!(p.confirm.as_deref(), Some("worker-2"));
+        // Anything but y cancels.
+        assert_eq!(press(&mut p, KeyCode::Enter), Action::None);
+        assert!(p.confirm.is_none());
+        press(&mut p, KeyCode::Enter);
+        assert_eq!(press(&mut p, KeyCode::Char('y')), Action::OpenNode { node: "worker-2".into() });
+        press(&mut p, KeyCode::Down);
+        press(&mut p, KeyCode::Enter);
+        assert!(p.confirm.is_none() && p.status_text().unwrap().contains("NotReady"));
+    }
+
+    #[test]
     fn moving_in_the_namespace_pane_lists_that_namespace() {
         let mut p = picker();
-        assert_eq!(p.ns_sel, 3);
+        assert_eq!(p.ns_sel, 4);
         press(&mut p, KeyCode::Tab);
         press(&mut p, KeyCode::Up);
         assert_eq!((p.ns.as_str(), p.pods.is_none()), ("kube-system", true));

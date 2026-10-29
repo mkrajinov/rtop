@@ -29,7 +29,8 @@ Size: **S** is an evening, **M** a few days, **L** a week or more.
 - [x] `rtop k8s`: pick a namespace and pod in the current (or `--context`) context; Esc goes back to the list
 - [x] `rtop k8s --pod ns/name`: processes of all containers in a pod, with a CONTAINER column; exec first, ephemeral debug container for distroless images
 - [x] `rtop k8s --node name`: every process on a node, labelled with its pod and container or `host`, through a short-lived, read-only helper pod
-- [ ] Nodes in the picker, and a container-aware dashboard (limits, throttling, OOM kills)
+- [x] Nodes in the picker, with a confirmation before the helper pod is created
+- [ ] Container-aware dashboard (limits, throttling, OOM kills)
 
 ## Phase 1: finish the dashboard (small, visible wins)
 

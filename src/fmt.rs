@@ -48,6 +48,26 @@ pub fn age(start_unix: u64) -> String {
     }
 }
 
+/// `16Gi`, `1024Ki`, `2G`, `123456` → bytes.
+pub fn quantity_bytes(q: &str) -> Option<u64> {
+    let split = q.find(|c: char| !c.is_ascii_digit()).unwrap_or(q.len());
+    let (n, unit) = q.split_at(split);
+    let n: u64 = n.parse().ok()?;
+    let mul: u64 = match unit {
+        "" => 1,
+        "Ki" => 1 << 10,
+        "Mi" => 1 << 20,
+        "Gi" => 1 << 30,
+        "Ti" => 1 << 40,
+        "k" => 1_000,
+        "M" => 1_000_000,
+        "G" => 1_000_000_000,
+        "T" => 1_000_000_000_000,
+        _ => return None,
+    };
+    Some(n * mul)
+}
+
 pub fn now_unix() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }

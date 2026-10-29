@@ -271,3 +271,42 @@ fn node_mode_shows_pods_and_host() {
     press(&mut app, KeyCode::Char('k'));
     assert_eq!(app.mode, rtop::app::Mode::Table);
 }
+
+#[cfg(feature = "kube")]
+#[test]
+fn k8s_picker_lists_nodes_and_confirms_the_helper() {
+    use rtop::kube::msg::NodeSummary;
+    use rtop::picker::{Action, Picker};
+    let mut p = Picker::new("kind-rtop", false, "v1.32.2", "rtop-demo");
+    p.set_namespaces(vec!["default".into(), "rtop-demo".into()]);
+    p.came_back_from_node("worker-1");
+    let node = |name: &str, ready, roles: &[&str], unschedulable| NodeSummary {
+        name: name.into(),
+        ready,
+        roles: roles.iter().map(|r| r.to_string()).collect(),
+        created: Some(1_000_000 - 5 * 86_400),
+        version: "v1.32.2".into(),
+        cpu: Some("8".into()),
+        memory: Some("32827316Ki".into()),
+        unschedulable,
+    };
+    p.set_nodes(Ok(vec![
+        node("control-plane", true, &["control-plane"], false),
+        node("worker-1", true, &[], false),
+        node("worker-2", true, &[], true),
+        node("worker-3", false, &[], false),
+    ]));
+    p.now = 1_000_000;
+    p.handle_key(KeyEvent::from(KeyCode::Enter));
+    let mut term = Terminal::new(TestBackend::new(110, 10)).unwrap();
+    term.draw(|f| ui::picker::draw(f, &p)).unwrap();
+    let buf = term.backend().buffer();
+    let screen = (0..10)
+        .map(|y| (0..110).map(|x| buf[(x, y)].symbol()).collect::<String>().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("create a hostPID helper pod in kind-rtop / rtop-demo on node worker-1?"), "{screen}");
+    assert!(screen.contains("Ready,SchedulingDisabled"), "{screen}");
+    insta::assert_snapshot!(screen);
+    assert_eq!(p.handle_key(KeyEvent::from(KeyCode::Char('y'))), Action::OpenNode { node: "worker-1".into() });
+}

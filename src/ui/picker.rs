@@ -1,4 +1,5 @@
-//! The `rtop k8s` picker: namespaces on the left, their pods on the right.
+//! The `rtop k8s` picker: namespaces on the left, their pods (or the
+//! cluster's nodes) on the right.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -9,8 +10,8 @@ use ratatui::widgets::{
 };
 
 use super::theme;
-use crate::kube::msg::PodSummary;
-use crate::picker::{Pane, Picker};
+use crate::kube::msg::{NodeSummary, PodSummary};
+use crate::picker::{NODES, Pane, Picker};
 
 pub fn draw(f: &mut Frame, p: &Picker) {
     let full = f.area();
@@ -67,6 +68,7 @@ fn draw_namespaces(f: &mut Frame, p: &Picker, area: Rect) {
         .iter()
         .map(|n| match n.as_str() {
             "" => ListItem::new(Span::styled("all namespaces", theme::dim())),
+            NODES => ListItem::new(Span::styled("⎈ nodes", Style::default().fg(theme::pal().accent))),
             n => ListItem::new(n.to_string()),
         })
         .collect();
@@ -76,6 +78,9 @@ fn draw_namespaces(f: &mut Frame, p: &Picker, area: Rect) {
 }
 
 fn draw_pods(f: &mut Frame, p: &Picker, area: Rect) {
+    if p.showing_nodes() {
+        return draw_nodes(f, p, area);
+    }
     let focused = p.focus == Pane::Pods;
     let all = p.ns.is_empty();
     let rows = p.visible_pods();
@@ -123,6 +128,70 @@ fn draw_pods(f: &mut Frame, p: &Picker, area: Rect) {
     f.render_stateful_widget(table, area, &mut state);
 }
 
+fn draw_nodes(f: &mut Frame, p: &Picker, area: Rect) {
+    let focused = p.focus == Pane::Pods;
+    let rows = p.visible_nodes();
+    let title = match &p.nodes {
+        Some(Ok(_)) => format!("Nodes ({})", rows.len()),
+        _ => "Nodes".into(),
+    };
+    let block = pane(&title, focused);
+    let message = match &p.nodes {
+        None => Some(("loading…".to_string(), theme::dim())),
+        Some(Err(e)) => Some((e.clone(), Style::default().fg(theme::pal().bad))),
+        Some(Ok(_)) if rows.is_empty() => Some((format!("no node matches “{}”", p.pod_filter), theme::dim())),
+        _ => None,
+    };
+    if let Some((text, style)) = message {
+        f.render_widget(Paragraph::new(Span::styled(text, style)).block(block), area);
+        return;
+    }
+    let longest = rows.iter().map(|n| n.name.len()).max().unwrap_or(0) as u16;
+    let widths = [
+        Constraint::Length(longest.clamp(4, 48)),
+        // Ready,SchedulingDisabled
+        Constraint::Length(24),
+        Constraint::Length(13),
+        Constraint::Length(4),
+        Constraint::Length(8),
+        Constraint::Length(4),
+        Constraint::Fill(1),
+    ];
+    let header = ["NAME", "STATUS", "ROLES", "AGE", "VERSION", "CPU", "MEMORY"];
+    let body: Vec<Row> = rows.iter().map(|n| node_row(p, n)).collect();
+    let table = Table::new(body, widths)
+        .header(Row::new(header).style(theme::dim().add_modifier(Modifier::BOLD)))
+        .column_spacing(2)
+        .block(block)
+        .row_highlight_style(highlight(focused));
+    let mut state = TableState::default().with_selected(Some(p.pod_sel));
+    f.render_stateful_widget(table, area, &mut state);
+}
+
+fn node_row<'a>(p: &Picker, n: &'a NodeSummary) -> Row<'a> {
+    let pal = theme::pal();
+    let mut status = if n.ready { "Ready".to_string() } else { "NotReady".to_string() };
+    if n.unschedulable {
+        status.push_str(",SchedulingDisabled");
+    }
+    let color = match (n.ready, n.unschedulable) {
+        (true, false) => pal.good,
+        (true, true) => pal.warn,
+        _ => pal.bad,
+    };
+    let roles = if n.roles.is_empty() { "<none>".to_string() } else { n.roles.join(",") };
+    let memory = n.memory.as_deref().and_then(crate::fmt::quantity_bytes).map(crate::fmt::bytes).unwrap_or_default();
+    Row::new(vec![
+        Cell::from(Span::styled(n.name.as_str(), if n.ready { theme::bold() } else { theme::dim() })),
+        Cell::from(Span::styled(status, Style::default().fg(color))),
+        Cell::from(Span::styled(roles, theme::dim())),
+        Cell::from(n.created.map_or_else(String::new, |t| short_age(p.now.saturating_sub(t.max(0) as u64)))),
+        Cell::from(Span::styled(n.version.as_str(), theme::dim())),
+        Cell::from(n.cpu.clone().unwrap_or_default()),
+        Cell::from(memory),
+    ])
+}
+
 fn row<'a>(p: &Picker, pod: &'a PodSummary, all: bool) -> Row<'a> {
     let pal = theme::pal();
     let running = pod.phase == "Running";
@@ -165,7 +234,18 @@ fn short_age(s: u64) -> String {
 
 fn draw_footer(f: &mut Frame, p: &Picker, area: Rect) {
     let pal = theme::pal();
-    let line = if let Some(target) = &p.connecting {
+    let line = if let Some(node) = &p.confirm {
+        // The one place the picker writes to the cluster: say exactly what.
+        Line::from(vec![
+            Span::styled(" create a hostPID helper pod ", Style::default().fg(pal.warn)),
+            Span::styled(
+                format!("in {} / {}", p.context, p.helper_ns),
+                Style::default().fg(pal.warn).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" on node {node}?"), Style::default().fg(pal.warn)),
+            Span::styled("   y create · any other key cancels", theme::dim()),
+        ])
+    } else if let Some(target) = &p.connecting {
         Line::from(vec![
             Span::styled(format!(" connecting to {target} …"), Style::default().fg(pal.accent)),
             Span::styled("   Esc cancel", theme::dim()),

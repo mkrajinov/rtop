@@ -93,6 +93,7 @@ impl State {
             Request::ListPods { ns } => self.list_pods(&ns).await,
             Request::WatchPod { ns, name } => self.watch_pod(ns, name),
             Request::GetNode { name } => self.get_node(&name).await,
+            Request::ListNodes => self.list_nodes().await,
             Request::WatchNodePods { node } => self.watch_node_pods(node),
             Request::HelperDelete { ns, name } => match self.pods(&ns) {
                 Ok(api) => super::helper::delete(&api, &name).await,
@@ -159,6 +160,14 @@ impl State {
         let mut pods: Vec<_> = list.items.iter().map(convert::pod_summary).collect();
         pods.sort_by(|a, b| (&a.ns, &a.name).cmp(&(&b.ns, &b.name)));
         Ok(Reply::Pods(pods))
+    }
+
+    async fn list_nodes(&self) -> Result<Reply, KubeError> {
+        let api: Api<Node> = Api::all(self.client()?.clone());
+        let list = api.list(&ListParams::default().match_any()).await.map_err(map_err)?;
+        let mut nodes: Vec<_> = list.items.iter().map(convert::node_summary).collect();
+        nodes.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(Reply::Nodes(nodes))
     }
 
     async fn get_node(&self, name: &str) -> Result<Reply, KubeError> {
@@ -673,7 +682,7 @@ pub(crate) mod tests {
     #[test]
     fn unknown_requests_are_unsupported_not_fatal() {
         let (mut k, _api) = mocked();
-        let id = k.send(Request::ListNodes);
+        let id = k.send(Request::Probe { ns: "rtop-demo".into(), pod: "multi".into(), container: "app".into() });
         let Reply::Err(e) = reply(&k, id) else { panic!() };
         assert_eq!(e.code, ErrorCode::Unsupported);
         // The thread still answers afterwards.
