@@ -27,10 +27,10 @@ own.
 
 **Purpose**: feature-gated dependencies, module skeleton, local cluster tooling
 
-- [ ] T001 Add the `[features] default = ["kube"]` feature to Cargo.toml, with optional deps `kube` (`client`, `runtime`, `ws`, `rustls-tls`), `k8s-openapi` (pinned API version), `tokio` (`rt`, `macros`, `time`, `io-util`, `sync`), `futures` and `serde_json`, and dev-deps `tower-test` and `http`
-- [ ] T002 [P] Create the module skeleton `src/kube/`: `msg`, `client`, `convert`, `ephemeral`, `helper` and `session` under `#[cfg(feature = "kube")]`; `wire` and `attribution` always compiled. Register `pub mod kube;` in src/lib.rs.
-- [ ] T003 [P] Makefile: `kube-up`, `kube-e2e` and `kube-down` targets (kind cluster `rtop`, context `kind-rtop` hard-coded); `test` also runs `cargo test --no-default-features`
-- [ ] T004 [P] Write sample workloads `multi`, `distroless`, `shared` and `limited`, in namespace `rtop-demo` labelled `pod-security.kubernetes.io/enforce=privileged`, in tests/kube/workloads.yaml (per quickstart.md §1)
+- [X] T001 Add the `[features] default = ["kube"]` feature to Cargo.toml, with optional deps `kube` (`client`, `runtime`, `ws`, `rustls-tls`), `k8s-openapi` (pinned API version), `tokio` (`rt`, `macros`, `time`, `io-util`, `sync`), `futures` and `serde_json`, and dev-deps `tower-test` and `http`
+- [X] T002 [P] Create the module skeleton `src/kube/`: `msg`, `client`, `convert`, `ephemeral`, `helper` and `session` under `#[cfg(feature = "kube")]`; `wire` and `attribution` always compiled. Register `pub mod kube;` in src/lib.rs.
+- [X] T003 [P] Makefile: `kube-up`, `kube-e2e` and `kube-down` targets (kind cluster `rtop`, context `kind-rtop` hard-coded); `test` also runs `cargo test --no-default-features`
+- [X] T004 [P] Write sample workloads `multi`, `distroless`, `shared` and `limited`, in namespace `rtop-demo` labelled `pod-security.kubernetes.io/enforce=privileged`, in tests/kube/workloads.yaml (per quickstart.md §1)
 
 ---
 
@@ -41,24 +41,24 @@ Local mode must behave exactly as before.
 
 **⚠️ CRITICAL**: no user story work begins until this phase is complete
 
-- [ ] T005 Measure the clean build time and binary size with and without `--no-default-features`, and record them in research.md R1
-- [ ] T006 Add `ProcId { space: u16, pid: Pid }`, `Process.space`, `Process.origin: Option<Origin>`, `Process::id()` and `Target` to src/model.rs (data-model.md)
-- [ ] T007 Change `Collector::details` to take `ProcId`, and add `fn target(&self) -> Option<&Target>` (default `None`) and a `Pending` error type, in src/collector/mod.rs
-- [ ] T008 Update src/collector/linux.rs, src/collector/macos.rs and src/collector/fixture.rs to set `space: 0`, `origin: None` and accept `ProcId` in `details`
-- [ ] T009 Re-key src/app.rs on `ProcId` instead of `Pid`: `by_pid`, `children`, `selected_pid`, `Scope::Family`, the details request, the signal target and the lab scope set. `ppid` resolves within the same `space`.
-- [ ] T010 Handle `Pending` from `details()` in src/app.rs and src/ui/detail.rs: show "loading…" and retry on the next refresh, without a status-line error
-- [ ] T011 Run `cargo test`: existing insta snapshots in tests/snapshots/ must be unchanged (local mode untouched)
-- [ ] T012 [P] Write fixture captures tests/fixtures/kube/hello.bin, snap-pod.bin, snap-node.bin, details.bin (frames per contracts/reader-wire.md), from kind once T022 works; hand-written placeholders first
-- [ ] T013 [P] Implement the pure frame parser in src/kube/wire.rs: `\x1eF`/`\x1eE`/`\x1eD` framing, `p <pid>` records, link lines, the truncated-frame rule, seq matching
-- [ ] T014 [P] Unit tests for src/kube/wire.rs against tests/fixtures/kube/*.bin: well-formed, unreadable file (rc≠0), `\x1e` inside cmdline, stale seq discarded
-- [ ] T015 Define `Request`, `Reply`, `Event`, `KubeError` and the shapes in src/kube/msg.rs, per contracts/kube-messages.md
-- [ ] T016 Kube thread skeleton in src/kube/mod.rs:
+- [ ] T005 Measure the clean build time and binary size with and without `--no-default-features`, and record them in research.md R1 (first run 2026-10-29: release build 58 s vs 20 s, binary 1.9 MB both, because the kube code is not reachable from `main` yet; re-measure after T027)
+- [X] T006 Add `ProcId { space: u16, pid: Pid }`, `Process.space`, `Process.origin: Option<Origin>`, `Process::id()` and `Target` to src/model.rs (data-model.md)
+- [X] T007 Change `Collector::details` to take `ProcId`, and add `fn target(&self) -> Option<&Target>` (default `None`) and a `Pending` error type, in src/collector/mod.rs
+- [X] T008 Update src/collector/linux.rs, src/collector/macos.rs and src/collector/fixture.rs to set `space: 0`, `origin: None` and accept `ProcId` in `details`
+- [X] T009 Re-key src/app.rs on `ProcId` instead of `Pid`: `by_pid`, `children`, `selected_pid`, `Scope::Family`, the details request, the signal target and the lab scope set. `ppid` resolves within the same `space`.
+- [X] T010 Handle `Pending` from `details()` in src/app.rs and src/ui/detail.rs: show "loading…" and retry on the next refresh, without a status-line error
+- [X] T011 Run `cargo test`: existing insta snapshots in tests/snapshots/ must be unchanged (local mode untouched)
+- [X] T012 [P] Write fixture captures tests/fixtures/kube/hello.bin, snap-pod.bin, snap-node.bin, details.bin (frames per contracts/reader-wire.md), from kind once T022 works; hand-written placeholders first
+- [X] T013 [P] Implement the pure frame parser in src/kube/wire.rs: `\x1eF`/`\x1eE`/`\x1eD` framing, `p <pid>` records, link lines, the truncated-frame rule, seq matching
+- [X] T014 [P] Unit tests for src/kube/wire.rs against tests/fixtures/kube/*.bin: well-formed, unreadable file (rc≠0), `\x1e` inside cmdline, stale seq discarded
+- [X] T015 Define `Request`, `Reply`, `Event`, `KubeError` and the shapes in src/kube/msg.rs, per contracts/kube-messages.md
+- [X] T016 Kube thread skeleton in src/kube/mod.rs:
   - spawn a thread with a tokio `current_thread` runtime;
   - `std::sync::mpsc` channels in both directions;
   - `catch_unwind` with restart and `Event::ThreadRestarted`;
   - `Shutdown` handling;
   - the `Hello` handler in src/kube/client.rs (`Config::from_kubeconfig` with the context, server version).
-- [ ] T017 [P] Test harness in src/kube/client.rs tests: a `tower_test::mock` service behind `kube::Client::new` with helpers to expect requests and answer them with fixture JSON; a test for `Hello` and for 401/403/404 → `KubeError` code mapping
+- [X] T017 [P] Test harness in src/kube/client.rs tests: a `tower_test::mock` service behind `kube::Client::new` with helpers to expect requests and answer them with fixture JSON; a test for `Hello` and for 401/403/404 → `KubeError` code mapping
 
 **Checkpoint**: local rtop works as before, and `--no-default-features` builds. `ProcId` is in
 place, the wire format is parsed and tested on macOS, and the kube thread answers `Hello`

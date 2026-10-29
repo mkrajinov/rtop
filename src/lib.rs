@@ -5,6 +5,7 @@ pub mod collector;
 pub mod config;
 pub mod explain;
 pub mod fmt;
+pub mod kube;
 pub mod labs;
 pub mod model;
 pub mod ui;

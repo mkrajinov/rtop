@@ -18,7 +18,7 @@ procfs-core = "0.18"
 ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
-tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "io-util", "sync"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "macros", "time", "io-util", "sync"], optional = true }
 toml = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]

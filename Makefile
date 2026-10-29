@@ -6,13 +6,14 @@ DOCKER_RUN := docker run --rm --pid=host --privileged \
 	-v $(CURDIR):/src -v rtop-target:/target -v rtop-cargo:/usr/local/cargo/registry \
 	-w /src $(IMAGE)
 
-.PHONY: run test lint image linux-shell linux-test linux-run linux-up linux-exec linux-down
+.PHONY: run test lint image linux-shell linux-test linux-run linux-up linux-exec linux-down kube-up kube-e2e kube-down
 
 run:
 	cargo run --release
 
 test:
 	cargo test
+	cargo test --no-default-features
 
 lint:
 	cargo fmt --check
@@ -47,3 +48,19 @@ linux-exec:
 
 linux-down:
 	docker rm -f rtop
+
+# Local kind cluster for Kubernetes mode. Every kubectl call names the
+# kind-rtop context explicitly so nothing ever reaches another cluster.
+KUBE_CTX := kind-rtop
+
+kube-up:
+	kind get clusters | grep -qx rtop || kind create cluster --name rtop
+	kubectl --context $(KUBE_CTX) apply -f tests/kube/workloads.yaml
+	kubectl --context $(KUBE_CTX) -n rtop-demo wait --for=condition=Ready pod --all --timeout=180s
+
+kube-e2e: kube-up
+	cargo build --release
+	@echo "Cluster ready. Walk through specs/001-k8s-targets/quickstart.md with --context $(KUBE_CTX)."
+
+kube-down:
+	kind delete cluster --name rtop

@@ -1,0 +1,66 @@
+# Sample workloads for Kubernetes mode on the kind cluster (make kube-up).
+# See specs/001-k8s-targets/quickstart.md for what each one checks.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rtop-demo
+  labels:
+    # The node helper pod needs hostPID and a hostPath mount.
+    pod-security.kubernetes.io/enforce: privileged
+---
+# Two containers, two PID namespaces: each has its own PID 1.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi
+  namespace: rtop-demo
+spec:
+  containers:
+    - name: app
+      image: busybox:1.37
+      command: ["sh", "-c", "sleep 3600 & sleep 3600 & wait"]
+    - name: sidecar
+      image: busybox:1.37
+      command: ["sh", "-c", "while :; do date > /tmp/now; sleep 5; done"]
+---
+# No shell and no cat in the image: rtop must fall back to a debug container.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: distroless
+  namespace: rtop-demo
+spec:
+  containers:
+    - name: app
+      image: registry.k8s.io/pause:3.10
+---
+# One PID namespace for all containers: attribution by cgroup, plus pause.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: shared
+  namespace: rtop-demo
+spec:
+  shareProcessNamespace: true
+  containers:
+    - name: app
+      image: busybox:1.37
+      command: ["sleep", "3600"]
+    - name: sidecar
+      image: busybox:1.37
+      command: ["sh", "-c", "while :; do sleep 5; done"]
+---
+# Limits low enough to throttle: usage against limits, nr_throttled.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: limited
+  namespace: rtop-demo
+spec:
+  containers:
+    - name: app
+      image: busybox:1.37
+      command: ["sh", "-c", "while :; do :; done"]
+      resources:
+        requests: { cpu: 100m, memory: 64Mi }
+        limits: { cpu: 500m, memory: 256Mi }

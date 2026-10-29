@@ -1,0 +1,15 @@
+F version
+1
+E 0
+F uname
+6.12.0
+E 0
+F passwd
+root:x:0:0:root:/root:/bin/sh
+nobody:x:65534:65534:nobody:/:/bin/false
+app:x:1000:1000::/home/app:/bin/sh
+E 0
+F pagesize
+4096
+E 0
+D 0

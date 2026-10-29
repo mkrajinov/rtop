@@ -1,0 +1,38 @@
+F /proc/stat
+cpu  1000 0 500 90000 20 0 10 0 0 0
+cpu0 500 0 250 45000 10 0 5 0 0 0
+cpu1 500 0 250 45000 10 0 5 0 0 0
+btime 1761700000
+E 0
+F /proc/meminfo
+MemTotal:       65536000 kB
+MemFree:        30000000 kB
+MemAvailable:   40000000 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+E 0
+F /proc/loadavg
+0.50 0.40 0.30 2/180 77
+E 0
+F /proc/uptime
+12345.67 20000.00
+E 0
+F /proc/net/dev
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 100 1 0 0 0 0 0 0 100 1 0 0 0 0 0 0
+  eth0: 5000 50 0 0 0 0 0 0 3000 30 0 0 0 0 0 0
+E 0
+F /proc/diskstats
+E 1
+F p 1
+1 (sleep) S 0 1 1 0 -1 4194560 120 0 0 0 1 2 0 0 20 0 1 0 512 1658880 240 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 3 0 0 0 0 0
+0
+3
+E 0
+F p 7
+7 (worker) R 1 7 1 0 -1 4194560 3400 0 2 0 250 40 0 0 20 0 3 0 900 9437184 2048 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 1 0 0 0 0 0
+1000
+-1
+E 0
+D 1
