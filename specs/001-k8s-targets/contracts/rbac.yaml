@@ -1,0 +1,51 @@
+# Minimum permissions per rtop Kubernetes mode (FR-013). Copied into the README.
+# Bind with a RoleBinding (pod modes, per namespace) or ClusterRoleBinding (node mode).
+---
+# rtop --pod, exec only (with --no-debug-container)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rtop-pod-exec
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+# rtop --pod with the debug-container fallback (default)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rtop-pod-debug
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["patch"]
+---
+# rtop --node: read nodes and pods cluster-wide (attribution), run a helper pod.
+# The helper namespace must allow Pod Security level "privileged" (hostPID, hostPath).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rtop-node
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]   # explain why a helper pod did not start
