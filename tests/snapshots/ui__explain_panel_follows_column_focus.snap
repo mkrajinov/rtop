@@ -1,0 +1,44 @@
+---
+source: tests/ui.rs
+expression: screen
+---
+
+ ╭ cpu ─ Fixture CPU ───────────────────────── 2P 0% · 2E 0% · 62°C · 0% ╮ ╭ memory ──────────────────── 16.0G ╮ ╭ system ────── up 1d 02:03 · 1.5s ╮
+ │                                                  E0  ■■■■■■■■■■   0%  │ │ used            6.0G / 16.0G  38% │ │ load   1.25   0.75   0.50        │
+ │                                                  E1  ■■■■■■■■■■   0%  │ │ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │ │        1m     5m     15m         │
+ │                                                  P2  ■■■■■■■■■■   0%  │ │ swap               0B / 2.0G   0% │ │ tasks  4  ● 1 running            │
+ │                                                  P3  ■■■■■■■■■■   0%  │ │ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │ │        ● 1 zombie  ● 0 in D      │
+ │                                               ▁                       │ │                                 ▃ │ │ fans   2400 rpm                  │
+ ╰───────────────────────────────────────────────────────────────────────╯ ╰───────────────────────────────────╯ ╰──────────────────────────────────╯
+ ╭ network ──────────────────────────────────────── eth0 · /proc/net/dev ╮ ╭ disk ────── vda · /proc/diskstats ╮ ╭ gpu ─────────────────────────────╮
+ │ ↓ in 0B/s                 max 0B/s  ↑ out 0B/s               max 0B/s │ │ read 0B/s         write 0B/s      │ │ No GPU counters.                 │
+ │                                                                       │ │                                   │ │                                  │
+ │                                                                       │ │                                   │ │                                  │
+ │                                                                       │ │                                   │ │                                  │
+ │                                  ▁                                  ▁ │ │                ▁                ▁ │ │                                  │
+ ╰───────────────────────────────────────────────────────────────────────╯ ╰───────────────────────────────────╯ ╰──────────────────────────────────╯
+ ╭ processes 4 ──────────────────────────────────────────────────────────────────────────╮╭ explain · rss  [ ] scroll ──────────────────────────────╮
+ │     PID  S     NI        CPU%▼        MEM%     RSS  COMMAND                           ││ RSS — resident set size                                 │
+ │     201  Z      0          0.0         0.0      0B  <defunct> (defunct)               ││                                                         │
+ │     200  R     10          0.0  ▋      3.1    512M  cpuhog --threads 2                ││ ● PID 201 (defunct): 0B (0 bytes)                       │
+ │     100  S      0          0.0  ▏      0.0    4.0M  -bash                             ││                                                         │
+ │       1  S      0          0.0  ▏      0.0    4.0M  init                              ││ How much of the process's memory is in RAM right now.   │
+ │                                                                                       ││ It counts private pages and shared pages (libraries,    │
+ │                                                                                       ││ shared memory), and the shared pages are counted in     │
+ │                                                                                       ││ full for every process that maps them. So the RSS of    │
+ │                                                                                       ││ all processes added together can far exceed physical    │
+ │                                                                                       ││ RAM.                                                    │
+ │                                                                                       ││                                                         │
+ │                                                                                       ││ Linux VmRSS: in /proc/<pid>/status, which is RssAnon +  │
+ │                                                                                       ││ RssFile + RssShmem. Field 24 of stat gives the same     │
+ │                                                                                       ││ value in pages.                                         │
+ │                                                                                       ││ macOS proc_taskinfo.pti_resident_size. Activity Monitor │
+ │                                                                                       ││ prefers 'footprint' (see phys_footprint).  ◆ this       │
+ │                                                                                       ││ machine                                                 │
+ │                                                                                       ││                                                         │
+ │                                                                                       ││ Watch out                                               │
+ │                                                                                       ││ ! RSS double-counts shared libraries. For 'how much     │
+ │                                                                                       ││ would I free by killing this?', look at USS. For a fair │
+ │                                                                                       ││ share, look at PSS.                                     │
+ ╰───────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────╯
+  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    /  filter    t  tree    c  paths    f  family    k  signal    +-  nice    T

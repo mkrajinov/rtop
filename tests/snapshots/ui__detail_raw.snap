@@ -1,0 +1,24 @@
+---
+source: tests/ui.rs
+expression: screen
+---
+
+ ╭ PID 201 · defunct ─────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │  1 Overview   2 Memory   3 Files   4 Threads   5 Env   6 Limits   7 Kernel   8 Raw                                 │
+ │                                                                                                                    │
+ │ ▸ fixture                                                                                                          │
+ │   pid 201                                                                                                          │
+ │   state Z                                                                                                          │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │                                                                                                                    │
+ │ select a field to see where it comes from                                                                          │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ←→/1-8  tab    ↑↓  select    e  explain    r  raw source    [ ]  scroll explain    Esc  back    T  theme    ?  help

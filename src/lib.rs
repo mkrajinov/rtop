@@ -1,0 +1,10 @@
+//! rtop: a process explorer for learning how the kernel manages processes.
+
+pub mod app;
+pub mod collector;
+pub mod config;
+pub mod explain;
+pub mod fmt;
+pub mod labs;
+pub mod model;
+pub mod ui;

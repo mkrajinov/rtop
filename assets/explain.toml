@@ -1,0 +1,623 @@
+# rtop's textbook. One entry per field key used in the UI.
+# `linux` / `macos` say where the value comes from on each platform.
+
+# ───────────────────────────── identity ─────────────────────────────
+
+[pid]
+title = "PID — process ID"
+what = "A number the kernel assigns at fork(). It is unique among live processes, but it gets reused once a process is gone and reaped. On Linux, a 'process' is a thread group, and the PID is the thread-group ID (TGID). Each thread has its own TID, and the main thread's TID equals the PID."
+linux = "The /proc/<pid> directory name, and field 1 of /proc/<pid>/stat. It is allocated from a counter that wraps at /proc/sys/kernel/pid_max."
+macos = "proc_bsdinfo.pbi_pid, from proc_pidinfo(PROC_PIDTBSDINFO)."
+pitfalls = [
+  "PIDs are recycled. Tools that track a process over time must pair the PID with its start time. rtop's CPU% tracker does exactly that.",
+  "Inside a container, the same process has a different PID in each PID namespace. Look at NSpid in /proc/<pid>/status.",
+]
+try = ["echo $$", "cat /proc/sys/kernel/pid_max", "ps -o pid,lstart -p $$"]
+man = ["proc_pid_stat(5)", "getpid(2)", "pid_namespaces(7)"]
+
+[ppid]
+title = "PPID — parent process ID"
+what = "The process that forked this one. When a parent dies first, the kernel reparents its children: on Linux to the nearest 'child subreaper' or to PID 1 of the namespace, and on macOS to launchd (PID 1). Only the parent can wait() on a child, which is how exit statuses get collected."
+linux = "Field 4 of /proc/<pid>/stat, or PPid: in /proc/<pid>/status."
+macos = "proc_bsdinfo.pbi_ppid."
+pitfalls = [
+  "A PPID of 1 does not always mean 'started by init'. The process may be an orphan that was adopted.",
+  "In containers and systemd user sessions, a subreaper can adopt orphans instead of PID 1 (see prctl PR_SET_CHILD_SUBREAPER).",
+]
+try = ["ps -o pid,ppid,comm -p $$", "pstree -p $$"]
+man = ["fork(2)", "wait(2)", "prctl(2)"]
+
+[pgid]
+title = "Process group"
+what = "A set of processes that the shell treats as one job, e.g. every process in `a | b | c`. Ctrl-C sends SIGINT to the terminal's foreground process group. kill(-pgid, sig) signals the whole group, which is how rtop cleans up lab processes."
+linux = "Field 5 (pgrp) of /proc/<pid>/stat."
+macos = "proc_bsdinfo.pbi_pgid."
+try = ["ps -o pid,pgid,tpgid,comm", "sleep 100 | sleep 100 &  ps -o pid,pgid,comm"]
+man = ["setpgid(2)", "credentials(7)"]
+
+[sid]
+title = "Session ID"
+what = "Sessions group process groups under one controlling terminal. setsid() starts a new session with no controlling terminal; daemons do this to detach from your shell."
+linux = "Field 6 of /proc/<pid>/stat."
+macos = "Not in proc_bsdinfo. Use getsid(pid), or the SLEADER flag in the Kernel tab."
+man = ["setsid(2)", "credentials(7)"]
+
+[uid]
+title = "User / UIDs"
+what = "Every process carries several user IDs. The real UID says who started it. The effective UID is used for most permission checks. The saved UID lets a set-uid program drop privileges and later regain them. Linux adds an fsUID for file access. The USER column shows the effective UID mapped to a name via /etc/passwd or Directory Services."
+linux = "Uid: line of /proc/<pid>/status (real, effective, saved, fs). rtop's table takes the owner of the /proc/<pid> directory, which is the effective UID."
+macos = "proc_bsdinfo.pbi_uid (effective), pbi_ruid (real) and pbi_svuid (saved)."
+pitfalls = [
+  "If real and effective differ, a set-uid binary such as sudo or passwd is running with someone else's identity.",
+  "Inside a user namespace, UID 0 can map to an ordinary UID outside. See /proc/<pid>/uid_map.",
+]
+try = ["id", "ps -o pid,ruser,euser,comm -p $$", "grep Uid /proc/self/status"]
+man = ["credentials(7)", "setuid(2)", "user_namespaces(7)"]
+
+[comm]
+title = "Command name (comm)"
+what = "A short process name, truncated to 15 characters on Linux and 16 or 32 on macOS. By default it is the basename of the executed file. A program can change it with prctl(PR_SET_NAME) or pthread_setname_np, so it is not trustworthy as an identity."
+linux = "Field 2 of /proc/<pid>/stat (in parentheses), /proc/<pid>/comm, and Name: in status."
+macos = "proc_bsdinfo.pbi_name, which falls back to pbi_comm (MAXCOMLEN = 16)."
+pitfalls = [
+  "comm can contain spaces and ')' characters. A naive split(' ') of /proc/<pid>/stat breaks on it. Parse from the LAST ')'.",
+]
+try = ["cat /proc/self/comm", "ps -o comm= -p $$"]
+man = ["proc_pid_comm(5)", "prctl(2)"]
+
+[exe]
+title = "Executable path"
+what = "The file that was execve()'d. If that file was deleted or replaced after start, Linux shows the link target with a ' (deleted)' suffix. This is a classic sign that a binary was upgraded but the process wasn't restarted."
+linux = "readlink /proc/<pid>/exe. Only the owner (or CAP_SYS_PTRACE) may read it."
+macos = "proc_pidpath(pid), the vnode path of the main executable."
+try = ["readlink /proc/self/exe", "ls -l /proc/*/exe 2>/dev/null | grep deleted"]
+man = ["proc_pid_exe(5)", "execve(2)"]
+
+[cwd]
+title = "Current working directory"
+what = "Relative paths resolve against this directory. A process holding a directory open as its cwd keeps that filesystem busy: 'umount: target is busy' often comes down to some shell's cwd."
+linux = "readlink /proc/<pid>/cwd."
+macos = "proc_pidinfo(PROC_PIDVNODEPATHINFO).pvi_cdir. rtop doesn't show it yet; try lsof -p PID -d cwd."
+try = ["readlink /proc/$$/cwd", "lsof -p $$ -d cwd"]
+man = ["getcwd(3)", "chdir(2)"]
+
+[cmdline]
+title = "Command line (argv)"
+what = "The argument vector passed to execve(). The kernel keeps it in the process's own memory, so a process can overwrite it (some daemons rewrite theirs to show status). Kernel threads have no user memory, so tools show their comm in [brackets]."
+linux = "/proc/<pid>/cmdline, with arguments separated by NUL bytes. It is empty for kernel threads and zombies."
+macos = "sysctl(CTL_KERN, KERN_PROCARGS2, pid). The buffer is argc, exec_path, padding, argv, then env. Look at the hexdump in the Raw tab."
+pitfalls = [
+  "Secrets passed as arguments are visible to every user via /proc/<pid>/cmdline (unless /proc is mounted with hidepid). Pass secrets through the environment or files instead.",
+]
+try = ["tr '\\0' ' ' < /proc/self/cmdline; echo", "ps -o args= -p $$"]
+man = ["proc_pid_cmdline(5)", "execve(2)"]
+
+[environ]
+title = "Environment"
+what = "The environment strings given to execve(). This is a snapshot taken at exec: if the process later calls setenv(), its in-memory copy changes, but what /proc shows usually doesn't."
+linux = "/proc/<pid>/environ (NUL-separated). Readable only by the owner."
+macos = "The tail of the KERN_PROCARGS2 buffer, after argv. Readable only by the owner."
+try = ["tr '\\0' '\\n' < /proc/self/environ | head"]
+man = ["environ(7)", "proc_pid_environ(5)"]
+
+[nspid]
+title = "PID in each PID namespace"
+what = "PID namespaces nest. A process has one PID per level, from the outermost (host) to the innermost (container). Inside a container the main process is often PID 1, which means it inherits init's duties: reaping orphans and special signal handling."
+linux = "NSpid: (and NStgid, NSpgid, NSsid) in /proc/<pid>/status."
+macos = "No PID namespaces."
+try = ["grep NSpid /proc/self/status", "docker run --rm alpine cat /proc/self/status | grep NSpid"]
+man = ["pid_namespaces(7)"]
+
+[tracer]
+title = "Tracer PID"
+what = "Non-zero when another process has attached with ptrace(): a debugger (gdb, lldb), strace, or a sandbox. A traced process stops at every event the tracer asks for, which is why strace slows programs down."
+linux = "TracerPid: in /proc/<pid>/status."
+macos = "The TRACED flag in proc_bsdinfo.pbi_flags."
+try = ["strace -p PID   # then look again", "cat /proc/sys/kernel/yama/ptrace_scope"]
+man = ["ptrace(2)"]
+
+[tty]
+title = "Controlling terminal"
+what = "The terminal whose signals (Ctrl-C, Ctrl-Z, SIGHUP on hang-up) reach this process's session. Daemons have none, and shown as '?' by ps."
+linux = "Field 7 (tty_nr) of /proc/<pid>/stat, encoded as a device number (major << 8 | minor)."
+macos = "proc_bsdinfo.e_tdev. 0xffffffff (NODEV) means none."
+try = ["tty", "ps -o pid,tty,comm"]
+man = ["credentials(7)", "tty(4)"]
+
+# ───────────────────────────── state & scheduling ─────────────────────────────
+
+[state]
+title = "Process state"
+what = "What the scheduler thinks this process is doing right now.\nR running or on a run queue.\nS interruptible sleep: waiting for something, can be woken by a signal.\nD uninterruptible sleep: waiting inside the kernel (usually I/O) and ignoring signals, even SIGKILL.\nT stopped by SIGSTOP or Ctrl-Z.\nt stopped by a debugger.\nZ zombie: exited, waiting for its parent to call wait().\nI idle kernel thread."
+linux = "Field 3 of /proc/<pid>/stat, and State: in status (with a word)."
+macos = "proc_bsdinfo.pbi_status (SIDL, SRUN, SSLEEP, SSTOP, SZOMB). Almost every live process is SRUN, so rtop refines it with proc_taskinfo.pti_numrunning: R if a thread is on a CPU, S otherwise. '?' means the kernel would not give us task info for that process."
+pitfalls = [
+  "On Linux, D-state tasks count toward the load average. A load of 50 on an idle CPU usually means stuck I/O (NFS, a dying disk), not CPU pressure.",
+  "You cannot kill a zombie. It is already dead. Kill (or fix) its parent, and init/launchd will adopt and reap it.",
+  "A process sitting in D for a long time triggers the kernel's 'hung task' warning in dmesg after 120 s.",
+]
+try = ["ps -eo stat,pid,comm | sort | uniq -c -w1", "cat /proc/loadavg", "rtop lab zombie", "rtop lab dstate"]
+man = ["proc_pid_stat(5)", "ps(1)"]
+
+[wchan]
+title = "Wait channel (wchan)"
+what = "The kernel function a sleeping process is blocked in. This is the first thing to look at for a D-state process: it tells you whether it is stuck on disk, NFS, a lock, or a vfork child."
+linux = "/proc/<pid>/wchan, which gives a symbol name such as do_wait or wait_for_vfork_done. Kernels with kptr restrictions may show 0."
+macos = "Not exposed per process. Use `sudo spindump PID` or `sample PID` to see where threads block."
+try = ["cat /proc/$$/wchan; echo", "ps -o pid,stat,wchan:32,comm"]
+man = ["proc_pid_wchan(5)"]
+
+[nice]
+title = "Nice value"
+what = "How polite a process is about CPU, from -20 (greedy) to 19 (polite). Nice only matters when the CPU is contended. On Linux's fair scheduler, each nice step is about a 10% (×1.25) change in CPU share, so nice 0 vs nice 19 is roughly a 1000:15 ratio. Anyone may raise their own nice value. Lowering it requires root or CAP_SYS_NICE."
+linux = "Field 19 of /proc/<pid>/stat."
+macos = "proc_bsdinfo.pbi_nice. macOS's scheduler mostly follows QoS classes, so nice has a weaker effect there."
+pitfalls = [
+  "On an idle multi-core machine, nice 19 and nice 0 run at the same speed. You need more runnable threads than cores to see a difference.",
+  "Nice does not affect I/O priority. Use ionice (Linux) or taskpolicy (macOS) for that.",
+]
+try = ["nice -n 10 sleep 60 &  ps -o pid,ni,pri,comm", "renice +5 -p PID", "rtop lab cpuhog"]
+man = ["nice(1)", "setpriority(2)", "sched(7)"]
+
+[priority]
+title = "Priority"
+what = "The scheduler's internal priority, derived from nice (or set directly for real-time tasks). Different tools print different scales, so compare numbers within one tool only."
+linux = "Field 18 of /proc/<pid>/stat. For normal tasks it is 20 + nice (0…39). For real-time tasks it is -2 … -100. ps's PRI column uses yet another scale."
+macos = "proc_taskinfo.pti_priority, Mach's 0–127 scale. The timeshare default is 31. Higher means more important, the opposite of Linux."
+try = ["ps -o pid,ni,pri,rtprio,cls,comm", "chrt -p $$"]
+man = ["sched(7)", "proc_pid_stat(5)"]
+
+[policy]
+title = "Scheduling policy"
+what = "Which scheduler class runs this task. SCHED_OTHER is the normal fair-share class (CFS, or EEVDF since Linux 6.6). SCHED_FIFO and SCHED_RR are real-time: they always preempt normal tasks, which is why a runaway real-time task can freeze a box. SCHED_BATCH and SCHED_IDLE are for background work. SCHED_DEADLINE is earliest-deadline-first."
+linux = "Field 41 of /proc/<pid>/stat. Change it with chrt(1)."
+macos = "proc_taskinfo.pti_policy: Mach's POLICY_TIMESHARE, POLICY_RR or POLICY_FIFO."
+try = ["chrt -p $$", "sudo chrt -f 10 sleep 30"]
+man = ["sched(7)", "chrt(1)"]
+
+[rt_priority]
+title = "Real-time priority"
+what = "1–99 for SCHED_FIFO and SCHED_RR tasks, and 0 for normal tasks. A higher real-time priority always runs first."
+linux = "Field 40 of /proc/<pid>/stat."
+macos = "Not exposed this way."
+man = ["sched(7)"]
+
+[processor]
+title = "Last CPU"
+what = "The CPU this task last ran on. Watching it change shows the load balancer migrating tasks between cores. Pinning with taskset stops that."
+linux = "Field 39 of /proc/<pid>/stat."
+macos = "Not exposed."
+try = ["ps -o pid,psr,comm", "taskset -c 0 yes > /dev/null"]
+man = ["sched_setaffinity(2)", "taskset(1)"]
+
+[cpus_allowed]
+title = "CPU affinity"
+what = "The set of CPUs this task may run on. Container runtimes set it via the cgroup cpuset controller. taskset or sched_setaffinity() can narrow it further."
+linux = "Cpus_allowed_list: in /proc/<pid>/status."
+macos = "macOS has no hard affinity API. Thread affinity tags are only hints."
+try = ["grep Cpus_allowed_list /proc/self/status", "taskset -pc $$"]
+man = ["sched_setaffinity(2)", "cpuset(7)"]
+
+[schedstat]
+title = "Scheduler statistics"
+what = "Three counters: time spent running on a CPU, time spent waiting runnable on a run queue, and the number of timeslices. If run-queue wait is high relative to CPU time, the process wants CPU but can't get it. That is CPU saturation, which CPU% alone hides."
+linux = "/proc/<pid>/schedstat: on_cpu_ns, runq_wait_ns, timeslices."
+macos = "Not exposed. proc_pid_rusage gives ri_runnable_time, a rough equivalent."
+try = ["cat /proc/self/schedstat"]
+man = ["proc_pid_schedstat(5)"]
+
+[threads]
+title = "Threads"
+what = "Number of threads (kernel-scheduled entities) in the process. On Linux, threads are tasks that share an address space, created by clone(CLONE_VM|CLONE_THREAD…). Each has its own TID, state and CPU time under /proc/<pid>/task/<tid>/."
+linux = "Field 20 (num_threads) of /proc/<pid>/stat. The Threads tab reads /proc/<pid>/task/*/stat."
+macos = "proc_taskinfo.pti_threadnum. The Threads tab uses PROC_PIDLISTTHREADS plus PROC_PIDTHREADINFO for each thread."
+pitfalls = [
+  "RLIMIT_NPROC counts threads, not processes, for the user on Linux. A thread leak can make fork() fail across the whole account.",
+]
+try = ["ls /proc/self/task", "ps -L -o pid,tid,stat,comm -p PID", "rtop lab threads"]
+man = ["clone(2)", "pthreads(7)"]
+
+[ctx_switches]
+title = "Context switches"
+what = "How many times the task left the CPU. A voluntary switch means it blocked: waiting for I/O, a lock or sleep. An involuntary switch means the scheduler preempted it because its timeslice ran out or a higher-priority task woke up. Many involuntary switches mean CPU contention. Many voluntary switches mean an I/O- or lock-bound workload."
+linux = "voluntary_ctxt_switches and nonvoluntary_ctxt_switches in /proc/<pid>/status."
+macos = "proc_taskinfo.pti_csw (a single total)."
+try = ["grep ctxt /proc/self/status", "pidstat -w 1"]
+man = ["proc_pid_status(5)"]
+
+[cpu_percent]
+title = "CPU%"
+what = "The share of one CPU core this process used since the last refresh. The kernel only keeps cumulative CPU time, so this is (cpu_time_now − cpu_time_before) ÷ wall-clock time between samples. 100% is one full core, so a multi-threaded process can exceed 100%."
+linux = "utime + stime (fields 14 and 15 of /proc/<pid>/stat) in clock ticks, converted with sysconf(_SC_CLK_TCK), usually 100 per second."
+macos = "proc_taskinfo.pti_total_user + pti_total_system. These are in Mach absolute time units and must be scaled by mach_timebase_info (125/3 on Apple Silicon)."
+pitfalls = [
+  "The first frame is always 0%. A rate needs two samples.",
+  "Linux tick-based accounting is coarse (10 ms). Short-lived processes can run without ever being charged a tick.",
+  "ps reports something different. On Linux, ps %CPU is cputime ÷ lifetime (an average since start); macOS ps uses a decaying average. top, htop and rtop show the rate over the last interval.",
+]
+try = ["top -d 1", "cat /proc/self/stat | awk '{print $14, $15}'", "getconf CLK_TCK"]
+man = ["proc_pid_stat(5)", "times(2)"]
+
+[cpu_time]
+title = "CPU time (TIME+)"
+what = "Total CPU time consumed since the process started. User time is spent running the program's own code. System time is spent in the kernel on its behalf (syscalls, page faults). High system time points at syscall-heavy code or memory pressure."
+linux = "Fields 14 (utime) and 15 (stime) of /proc/<pid>/stat, in clock ticks. Fields 16 and 17 add the CPU time of reaped children."
+macos = "proc_taskinfo.pti_total_user and pti_total_system, in Mach absolute time units."
+try = ["time ls -R / > /dev/null 2>&1", "ps -o pid,time,comm"]
+man = ["time(1)", "getrusage(2)"]
+
+[start_time]
+title = "Start time"
+what = "When the process was created (fork), not when it last exec'd."
+linux = "Field 22 of /proc/<pid>/stat, in clock ticks since boot. Add btime from /proc/stat to get a wall-clock time."
+macos = "proc_bsdinfo.pbi_start_tvsec and pbi_start_tvusec, already Unix time."
+try = ["ps -o pid,lstart,etime,comm -p $$"]
+man = ["proc_pid_stat(5)"]
+
+[faults]
+title = "Page faults"
+what = "A page fault happens when the program touches memory that isn't currently mapped in the page tables. A minor fault is resolved without disk I/O: zero-filling a new page, or mapping a page that is already in the page cache. A major fault needs a disk read. A climbing major-fault count in steady state means the process is thrashing."
+linux = "Fields 10 (minflt) and 12 (majflt) of /proc/<pid>/stat."
+macos = "proc_taskinfo.pti_faults (all faults) and pti_pageins (faults that needed I/O)."
+try = ["/usr/bin/time -v ls 2>&1 | grep -i fault", "ps -o pid,min_flt,maj_flt,comm"]
+man = ["getrusage(2)"]
+
+[pageins]
+title = "Page-ins"
+what = "Faults that had to read a page from disk, either from a mapped file or from swap or the compressor. It is the macOS counterpart of Linux's major faults."
+linux = "majflt (field 12 of /proc/<pid>/stat)."
+macos = "proc_taskinfo.pti_pageins."
+man = ["vm_stat(1)"]
+
+[cow_faults]
+title = "Copy-on-write faults"
+what = "After fork(), parent and child share every page read-only. The first write to a shared page faults, and the kernel copies just that page. This is why fork() is cheap even for huge processes, and why a forked child's RSS starts out 'shared'."
+linux = "Not counted separately. They show up as minor faults."
+macos = "proc_taskinfo.pti_cow_faults."
+man = ["fork(2)"]
+
+[syscalls]
+title = "System calls"
+what = "How many times the process entered the kernel. macOS has two syscall families: BSD (Unix: open, read, ...) and Mach traps (IPC, VM, ports)."
+linux = "Not counted per process. Use strace -c or perf trace -s."
+macos = "proc_taskinfo.pti_syscalls_unix and pti_syscalls_mach."
+try = ["strace -c ls > /dev/null", "sudo dtruss -c ls"]
+man = ["syscalls(2)", "strace(1)"]
+
+[mach_msgs]
+title = "Mach messages"
+what = "XNU is built on the Mach microkernel. Much of macOS's IPC (XPC, launchd, WindowServer) runs as messages sent to Mach ports. A chatty process shows high counts here."
+linux = "No equivalent. The closest analogues are UNIX sockets or D-Bus."
+macos = "proc_taskinfo.pti_messages_sent and pti_messages_received."
+man = []
+
+[proc_flags]
+title = "Process flags"
+what = "Kernel bookkeeping bits about the process: whether it is 64-bit, being traced, a session leader, has a controlling terminal, has changed privileges (set-id) since exec, and so on."
+linux = "Field 9 (flags) of /proc/<pid>/stat, with PF_* bits from include/linux/sched.h."
+macos = "proc_bsdinfo.pbi_flags, with PROC_FLAG_* bits from <sys/proc_info.h>."
+man = []
+
+[qos]
+title = "CPU time per QoS class"
+what = "macOS schedules threads mostly by Quality of Service class rather than by nice value. User-interactive work (UI) gets performance cores and priority. Background work is sent to efficiency cores and throttled. This breakdown shows where the process spent its CPU time."
+linux = "No direct equivalent. The closest are cgroup cpu.weight, nice and SCHED_IDLE."
+macos = "rusage_info_v4.ri_cpu_time_qos_*, from proc_pid_rusage."
+try = ["taskpolicy -b sleep 10", "man taskpolicy"]
+man = ["taskpolicy(8)"]
+
+# ───────────────────────────── memory ─────────────────────────────
+
+[vsz]
+title = "VSZ — virtual size"
+what = "The total size of every mapping in the address space: code, libraries, heap, stacks, mmap'd files, and reserved-but-untouched regions. It costs almost nothing until pages are touched, so a huge VSZ is normally harmless."
+linux = "Field 23 (vsize, bytes) of /proc/<pid>/stat, or VmSize: in status. The Memory tab lists every mapping from /proc/<pid>/maps."
+macos = "proc_taskinfo.pti_virtual_size. On macOS every process maps the multi-GB dyld shared cache, so VSZ looks enormous (hundreds of GB) even for `sleep`."
+pitfalls = [
+  "malloc(1 GiB) increases VSZ immediately, but RSS stays the same until you write to the memory. Run `rtop lab memgrow` to watch it.",
+  "Go and Java runtimes reserve large address ranges up front. A big VSZ there is not a leak.",
+]
+try = ["grep VmSize /proc/self/status", "ps -o pid,vsz,rss,comm"]
+man = ["proc_pid_maps(5)", "mmap(2)"]
+
+[rss]
+title = "RSS — resident set size"
+what = "How much of the process's memory is in RAM right now. It counts private pages and shared pages (libraries, shared memory), and the shared pages are counted in full for every process that maps them. So the RSS of all processes added together can far exceed physical RAM."
+linux = "VmRSS: in /proc/<pid>/status, which is RssAnon + RssFile + RssShmem. Field 24 of stat gives the same value in pages."
+macos = "proc_taskinfo.pti_resident_size. Activity Monitor prefers 'footprint' (see phys_footprint)."
+pitfalls = [
+  "RSS double-counts shared libraries. For 'how much would I free by killing this?', look at USS. For a fair share, look at PSS.",
+  "Memory that was swapped out or compressed drops out of RSS, but the process still owns it.",
+]
+try = ["grep -E 'VmRSS|Rss' /proc/self/status", "ps -o pid,rss,comm --sort=-rss | head"]
+man = ["proc_pid_status(5)"]
+
+[rss_anon]
+title = "RSS: anonymous"
+what = "Resident memory that isn't backed by a file: heap, stacks, and private mmap. If it has to be evicted, it can only go to swap. This is usually the number that grows when a program leaks."
+linux = "RssAnon: in /proc/<pid>/status."
+macos = "No split. Footprint is mostly anonymous memory."
+man = ["proc_pid_status(5)"]
+
+[rss_file]
+title = "RSS: file-backed"
+what = "Resident pages that come from files: the executable, libraries and mmap'd data files. Under pressure the kernel can drop clean file pages and re-read them later, so they are cheap."
+linux = "RssFile: in /proc/<pid>/status."
+macos = "Not split out."
+man = ["proc_pid_status(5)"]
+
+[rss_shmem]
+title = "RSS: shared memory"
+what = "Resident shmem pages: System V or POSIX shared memory, tmpfs files and MAP_SHARED anonymous mappings."
+linux = "RssShmem: in /proc/<pid>/status."
+macos = "Not split out."
+man = ["shm_overview(7)"]
+
+[hwm]
+title = "Peak RSS (VmHWM)"
+what = "The highest RSS this process has ever reached (high water mark). Useful for sizing container memory limits."
+linux = "VmHWM: in /proc/<pid>/status."
+macos = "rusage_info_v4.ri_lifetime_max_phys_footprint is the closest equivalent."
+man = ["proc_pid_status(5)"]
+
+[swap]
+title = "Swapped out"
+what = "Anonymous memory of this process that was moved to swap. It doesn't show up in RSS, but touching it causes a major fault."
+linux = "VmSwap: in /proc/<pid>/status."
+macos = "macOS compresses memory before swapping. Per-process compressed size is folded into phys_footprint."
+man = ["proc_pid_status(5)"]
+
+[vm_data]
+title = "Data + heap"
+what = "Size of the private writable data mappings, including the brk heap and anonymous mmaps. This is virtual size, not resident memory."
+linux = "VmData: in /proc/<pid>/status."
+macos = "No summary value. See the MALLOC_* regions in the Memory tab."
+man = ["proc_pid_status(5)"]
+
+[vm_stack]
+title = "Stack"
+what = "Size of the main thread's stack mapping. Thread stacks are separate anonymous mappings."
+linux = "VmStk: in /proc/<pid>/status."
+macos = "See the STACK regions in the Memory tab."
+man = ["proc_pid_status(5)"]
+
+[vm_lib]
+title = "Shared library code"
+what = "Virtual size of the executable mappings of shared libraries."
+linux = "VmLib: in /proc/<pid>/status."
+macos = "Libraries live in the dyld shared cache, a single huge shared mapping."
+man = ["ld.so(8)"]
+
+[vm_pte]
+title = "Page tables"
+what = "Memory the kernel uses for this process's page tables. It grows with the amount of mapped memory. With huge sparse mappings it can become surprisingly large, and huge pages help there."
+linux = "VmPTE: in /proc/<pid>/status."
+macos = "Not exposed."
+man = ["proc_pid_status(5)"]
+
+[vm_lck]
+title = "Locked memory"
+what = "Memory pinned with mlock(). It can never be swapped. Databases and crypto code use it for latency or secrecy. Capped by RLIMIT_MEMLOCK."
+linux = "VmLck: in /proc/<pid>/status."
+macos = "See wired memory."
+man = ["mlock(2)"]
+
+[pss]
+title = "PSS — proportional set size"
+what = "RSS with shared pages divided fairly: a page shared by 4 processes counts 1/4 to each. Adding up PSS across processes gives real RAM usage, which makes it the best number for 'how much memory does this app really use'."
+linux = "Pss: in /proc/<pid>/smaps_rollup. This is expensive for the kernel to compute because it walks the page tables."
+macos = "Not available. phys_footprint is the closest attribution metric."
+try = ["grep -E '^(Rss|Pss|Private)' /proc/self/smaps_rollup", "smem -k"]
+man = ["proc_pid_smaps(5)"]
+
+[uss]
+title = "USS — unique set size"
+what = "Pages mapped only by this process (Private_Clean + Private_Dirty). It is exactly what you would get back by killing it."
+linux = "Private_Clean + Private_Dirty in /proc/<pid>/smaps_rollup."
+macos = "Not available directly. `footprint PID` shows similar data."
+man = ["proc_pid_smaps(5)"]
+
+[phys_footprint]
+title = "Physical footprint"
+what = "Apple's main per-process memory metric, shown as 'Memory' in Activity Monitor. It counts dirty anonymous memory, compressed memory and some IOKit and graphics memory charged to the process. It excludes clean file-backed pages that the system could drop. Jetsam uses it to decide which process to kill under memory pressure."
+linux = "No single equivalent. The closest is RssAnon + VmSwap, or the cgroup's memory.current."
+macos = "rusage_info_v4.ri_phys_footprint, from proc_pid_rusage(RUSAGE_INFO_V4)."
+try = ["footprint PID", "vmmap --summary PID"]
+man = ["footprint(1)", "vmmap(1)"]
+
+[wired]
+title = "Wired memory"
+what = "Pages the kernel has pinned in RAM for this process. They can never be paged out."
+linux = "The analogue is locked memory (VmLck) or kernel allocations."
+macos = "rusage_info_v4.ri_wired_size."
+man = []
+
+[mem_percent]
+title = "MEM%"
+what = "RSS divided by total physical RAM. It inherits RSS's double-counting of shared pages."
+linux = "VmRSS ÷ MemTotal (/proc/meminfo)."
+macos = "pti_resident_size ÷ sysctl hw.memsize."
+man = ["ps(1)"]
+
+[maps]
+title = "Memory map (regions)"
+what = "Every contiguous range of the address space with its permissions and backing: the binary's text and data, the heap, each thread stack, every shared library, anonymous mmaps, and special kernel pages (vdso). This is the ground truth behind VSZ."
+linux = "/proc/<pid>/maps, one line per VMA: address range, perms (r w x p/s), offset, device, inode and path. /proc/<pid>/smaps adds RSS and PSS per region."
+macos = "proc_pidinfo(PROC_PIDREGIONPATHINFO) called repeatedly, one region at a time. Share modes: COW, PRV(ate), SHM, NUL (empty), SHR. User tags: MALLOC_*, STACK, DYLIB..."
+pitfalls = [
+  "Permissions show the mapping's current protection, e.g. a guard page is ---. On macOS the second triple is the maximum protection the region may ever be raised to.",
+]
+try = ["cat /proc/self/maps", "pmap -x $$", "vmmap PID"]
+man = ["proc_pid_maps(5)", "mmap(2)", "vmmap(1)"]
+
+[io_rchar]
+title = "Bytes read/written (syscall level)"
+what = "Bytes passed through read()/write()-family syscalls, whether or not they reached a disk. This includes pipes, sockets, tty, and reads served from the page cache."
+linux = "rchar and wchar in /proc/<pid>/io."
+macos = "Not available. ri_logical_writes is the closest."
+man = ["proc_pid_io(5)"]
+
+[io_read]
+title = "Storage bytes read"
+what = "Bytes this process actually caused to be fetched from a block device. If this is low while rchar is high, the reads are being served from the page cache."
+linux = "read_bytes in /proc/<pid>/io."
+macos = "rusage_info_v4.ri_diskio_bytesread."
+try = ["cat /proc/self/io", "iotop -o"]
+man = ["proc_pid_io(5)"]
+
+[io_write]
+title = "Storage bytes written"
+what = "Bytes this process caused to be written to storage. Writes land in the page cache first and are flushed later, often by a kernel thread, so the timing doesn't line up with write() calls."
+linux = "write_bytes in /proc/<pid>/io. cancelled_write_bytes counts dirty pages discarded by truncation."
+macos = "rusage_info_v4.ri_diskio_byteswritten."
+man = ["proc_pid_io(5)"]
+
+[oom_score]
+title = "OOM score"
+what = "How likely the Linux OOM killer is to pick this process when memory runs out (0–1000, higher is more likely). It is roughly the process's share of RAM plus swap, shifted by oom_score_adj (-1000 to +1000). -1000 makes a process immune; systemd and the kubelet set it for critical services."
+linux = "/proc/<pid>/oom_score and /proc/<pid>/oom_score_adj."
+macos = "macOS uses Jetsam priority bands instead. They are not readable without private APIs."
+try = ["cat /proc/self/oom_score /proc/self/oom_score_adj", "dmesg | grep -i 'killed process'"]
+man = ["proc_pid_oom_score(5)"]
+
+[wakeups]
+title = "Wakeups"
+what = "How often this process woke a CPU out of idle (package idle wakeups) or was woken by interrupts. Frequent wakeups prevent deep sleep states and drain laptop batteries. It is the classic 'energy impact' metric."
+linux = "No per-process counter. powertop estimates it."
+macos = "rusage_info_v4.ri_pkg_idle_wkups and ri_interrupt_wkups."
+try = ["sudo powermetrics --samplers tasks -n 1"]
+man = ["powermetrics(1)"]
+
+[instructions]
+title = "Instructions and cycles"
+what = "Hardware counters: how many instructions retired and how many CPU cycles were spent. IPC (instructions per cycle) tells you whether the code is compute-bound (high IPC) or stalled on memory or branches (IPC well below 1)."
+linux = "Not in /proc. Use perf stat -p PID."
+macos = "rusage_info_v4.ri_instructions and ri_cycles."
+try = ["perf stat -p PID sleep 5"]
+man = ["perf-stat(1)"]
+
+# ───────────────────────────── files ─────────────────────────────
+
+[fds]
+title = "Open file descriptors"
+what = "Small integers indexing the process's table of open files. Each entry can be a regular file, a directory, a pipe, a socket, a device, an eventfd, an epoll instance, and so on. 0, 1 and 2 are stdin, stdout and stderr by convention. A steadily growing count is an fd leak, which ends in EMFILE ('Too many open files') once it hits RLIMIT_NOFILE."
+linux = "Entries of /proc/<pid>/fd/. Each one is a symlink, and sockets appear as socket:[inode]. rtop resolves socket inodes using /proc/<pid>/net/{tcp,udp,unix}. /proc/<pid>/fdinfo/N has the offset and flags."
+macos = "proc_pidinfo(PROC_PIDLISTFDS) gives (fd, type) pairs. proc_pidfdinfo(PROC_PIDFDVNODEPATHINFO or PROC_PIDFDSOCKETINFO) gives paths and socket endpoints."
+pitfalls = [
+  "Deleted-but-open files still use disk space until the last fd is closed. That's why 'df' and 'du' disagree. Find them with `lsof +L1`.",
+  "Sockets show only an inode in /proc/<pid>/fd. You have to join it against /proc/net/* to see addresses, which is what ss -p does.",
+]
+try = ["ls -l /proc/self/fd", "lsof -p $$", "ss -tanp", "rtop lab fdleak"]
+man = ["proc_pid_fd(5)", "lsof(8)", "ss(8)"]
+
+# ───────────────────────────── limits ─────────────────────────────
+
+[limits]
+title = "Resource limits (rlimits)"
+what = "Per-process caps that are inherited across fork and exec. The soft limit is what is enforced. A process may raise its soft limit up to the hard limit, and only privileged processes may raise the hard limit."
+linux = "/proc/<pid>/limits, readable for any process you can see. Set with prlimit(1) or ulimit, or with LimitNOFILE= etc. in systemd units."
+macos = "getrlimit(2) only works on yourself. There is no API to read another process's rlimits. System-wide caps live in sysctl kern.*."
+try = ["cat /proc/self/limits", "ulimit -a", "prlimit -p PID"]
+man = ["getrlimit(2)", "prlimit(1)"]
+
+[limit_nofile]
+title = "RLIMIT_NOFILE — max open files"
+what = "One more than the highest fd number the process may open. When it is reached, open(), socket() and accept() fail with EMFILE. Servers handling many connections need it raised. Many distros default to a soft limit of 1024."
+linux = "The 'Max open files' row of /proc/<pid>/limits. The system-wide cap is fs.file-max."
+macos = "getrlimit(RLIMIT_NOFILE). It is capped by kern.maxfilesperproc."
+try = ["ulimit -n", "ulimit -n 64; python3 -c 'import os;[os.open(\"/dev/null\",0) for _ in range(100)]'"]
+man = ["getrlimit(2)"]
+
+[sysctl_limits]
+title = "System-wide limits (sysctl)"
+what = "Kernel-wide caps that apply above the per-process rlimits."
+linux = "/proc/sys/fs/file-max, /proc/sys/kernel/pid_max and /proc/sys/kernel/threads-max."
+macos = "sysctl kern.maxfiles, kern.maxfilesperproc, kern.maxproc and kern.maxprocperuid."
+try = ["sysctl kern.maxfiles kern.maxfilesperproc", "cat /proc/sys/fs/file-nr"]
+man = ["sysctl(8)"]
+
+# ───────────────────────────── kernel mechanisms ─────────────────────────────
+
+[namespaces]
+title = "Namespaces"
+what = "Namespaces give a process its own view of a global resource. mnt: mount table. pid: PID numbers. net: interfaces, routes, iptables and sockets. uts: hostname. ipc: SysV IPC. user: UID/GID mapping and capabilities. cgroup: cgroup root. time: clocks. A container is essentially a process with its own namespaces plus a cgroup. Two processes are in the same namespace exactly when the inode numbers match."
+linux = "/proc/<pid>/ns/* symlinks such as net:[4026531840]. rtop compares each one with its own."
+macos = "No namespaces. Docker Desktop and OrbStack run containers inside a Linux VM."
+pitfalls = [
+  "Entering a namespace (nsenter, setns) does not change the process's cgroup or capabilities. Those are separate mechanisms.",
+  "/proc/<pid>/net/* shows the network namespace of <pid>, which is why rtop reads sockets from the target process's own net directory.",
+]
+try = ["ls -l /proc/self/ns", "lsns", "unshare -Urn ip link", "rtop lab namespace"]
+man = ["namespaces(7)", "unshare(1)", "nsenter(1)"]
+
+[cgroup]
+title = "Control group (cgroup v2)"
+what = "cgroups put processes into a hierarchy and apply resource controls to each node: memory.max (hard limit, after which the OOM killer runs inside the cgroup), cpu.max (quota/period throttling), cpu.weight (fair share), pids.max and io.max. systemd puts every service in its own cgroup, and Kubernetes pod limits are cgroup limits."
+linux = "/proc/<pid>/cgroup gives the path ('0::/system.slice/foo.service' on v2). The controls live in /sys/fs/cgroup/<path>/."
+macos = "No cgroups. macOS uses coalitions, QoS and jetsam limits instead."
+pitfalls = [
+  "cpu.max '50000 100000' means 0.5 CPU per 100 ms period. A bursty multi-threaded app can use it up early in the period and then be throttled. Look at cpu.stat nr_throttled.",
+  "memory.current includes page cache charged to the cgroup, so it is higher than the sum of RSS.",
+]
+try = ["cat /proc/self/cgroup", "systemd-cgls", "cat /sys/fs/cgroup/$(cut -d: -f3 /proc/self/cgroup)/memory.current"]
+man = ["cgroups(7)", "systemd.resource-control(5)"]
+
+[psi]
+title = "Pressure stall information (PSI)"
+what = "Measures the percentage of time tasks in this cgroup were stalled waiting for CPU, memory or I/O, as 10-, 60- and 300-second averages. 'some' means at least one task was stalled; 'full' means all were. It tells you directly whether a resource is a bottleneck, which utilisation numbers cannot."
+linux = "cpu.pressure, memory.pressure and io.pressure in the cgroup directory. The system-wide values are in /proc/pressure/*."
+macos = "No equivalent. The memory_pressure tool covers memory only."
+try = ["cat /proc/pressure/cpu /proc/pressure/memory"]
+man = ["https://docs.kernel.org/accounting/psi.html"]
+
+[capabilities]
+title = "Capabilities"
+what = "Linux splits root's power into about 40 capabilities, e.g. CAP_NET_BIND_SERVICE (bind ports below 1024), CAP_NET_ADMIN (configure interfaces and iptables), CAP_SYS_ADMIN (an overloaded 'almost root') and CAP_SYS_PTRACE. The effective set is what the kernel checks. The permitted set is the most the process can enable. The bounding set limits what exec can ever grant. Ambient capabilities survive exec for non-set-uid programs."
+linux = "CapInh, CapPrm, CapEff, CapBnd and CapAmb in /proc/<pid>/status (hex bitmasks; decode them with capsh --decode)."
+macos = "No capabilities. The equivalents are entitlements in the code signature, TCC privacy permissions and root."
+pitfalls = [
+  "A process running as root inside a container usually has a reduced bounding set. Compare CapEff for `docker run` with and without --privileged.",
+]
+try = ["grep Cap /proc/self/status", "capsh --decode=$(grep CapEff /proc/self/status | cut -f2)", "getpcaps $$"]
+man = ["capabilities(7)", "capsh(1)"]
+
+[no_new_privs]
+title = "no_new_privs"
+what = "A one-way flag. Once it is set, execve() can never grant more privileges: set-uid bits and file capabilities are ignored. Unprivileged seccomp filters require it, and container runtimes set it."
+linux = "NoNewPrivs: in /proc/<pid>/status. Set it with prctl(PR_SET_NO_NEW_PRIVS)."
+macos = "No equivalent."
+try = ["setpriv --no-new-privs grep NoNewPrivs /proc/self/status"]
+man = ["prctl(2)"]
+
+[seccomp]
+title = "Seccomp"
+what = "Syscall filtering. In mode 2 (filter) a small BPF program inspects every syscall number and its arguments, and then allows the call, fails it with an errno, or kills the process. Docker's default profile blocks around 44 syscalls. Chrome, systemd services (SystemCallFilter=) and Android all use it."
+linux = "Seccomp: in /proc/<pid>/status (0 = off, 1 = strict, 2 = filter). Seccomp_filters: gives the number of stacked filters."
+macos = "No seccomp. The App Sandbox (Seatbelt profiles, sandbox-exec) plays a similar role."
+try = ["grep Seccomp /proc/self/status", "docker run --rm alpine grep Seccomp /proc/self/status"]
+man = ["seccomp(2)"]
+
+[signals]
+title = "Signal dispositions"
+what = "For each signal, a process can block it (hold it pending), ignore it, or catch it with a handler. SIGKILL and SIGSTOP can never be caught, blocked or ignored. If SIGTERM is caught, the process does its own graceful shutdown. If HUP is ignored, the process was probably started with nohup."
+linux = "SigBlk, SigIgn, SigCgt, SigPnd and ShdPnd in /proc/<pid>/status (64-bit masks; bit n-1 is signal n)."
+macos = "Not exposed per process."
+try = ["grep Sig /proc/self/status", "trap 'echo got TERM' TERM; grep SigCgt /proc/$$/status"]
+man = ["signal(7)"]
+
+[sysctl_flags]
+title = "Kernel flags"
+what = "Miscellaneous per-process kernel flags."
+linux = "Field 9 of /proc/<pid>/stat."
+macos = "proc_bsdinfo.pbi_flags."
+man = []
+
+# ───────────────────────────── views ─────────────────────────────
+
+[raw]
+title = "Raw sources"
+what = "The data exactly as the kernel produced it, before rtop parsed anything. On Linux these are the text files under /proc, and for stat rtop numbers each field. On macOS they are the C structs returned by proc_pidinfo and friends, dumped field by field. Press `r` on any field in another tab to jump here, with that field highlighted."
+linux = "cat the file yourself. Everything in this tab is a plain read()."
+macos = "The struct layouts are in <sys/proc_info.h> in the macOS SDK."
+try = ["cat /proc/$$/stat", "less $(xcrun --show-sdk-path)/usr/include/sys/proc_info.h"]
+man = ["proc(5)"]

@@ -1,0 +1,20 @@
+---
+source: tests/ui.rs
+expression: screen
+---
+
+ ╭ processes 4 · tree ──────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │     PID  USER          S    PRI    NI        CPU%▼        MEM%     VSZ     RSS   THR     FD      TIME+  COMMAND              │
+ │       1  root          S     20     0          0.0  ▏      0.0   64.0M    4.0M     1      4    0:00.00  init                 │
+ │     100  learner       S     20     0          0.0  ▏      0.0   64.0M    4.0M     1      4    0:00.00  └─ -bash             │
+ │     201  learner       Z     20     0          0.0         0.0      0B      0B     1      —    0:00.00     ├─ <defunct> (def │
+ │     200  learner       R     30    10          0.0  ▋      3.1    2.0G    512M     3      4    1h02:03     └─ cpuhog --threa │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    /  filter    t  tree    c  paths    f  family    k  sign

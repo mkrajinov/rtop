@@ -1,0 +1,20 @@
+---
+source: tests/ui.rs
+expression: "render(&mut app, 130, 16)"
+---
+
+ ╭ processes 4 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │     PID  USER          S    PRI    NI        CPU%▼        MEM%     VSZ     RSS   THR     FD      TIME+  COMMAND              │
+ │     201  learner       Z     20     0          0.0         0.0      0B      0B     1      —    0:00.00  <defunct> (defunct)  │
+ │     200  learner       R     30    10          0.0  ▋      3.1    2.0G    512M     3      4    1h02:03  cpuhog --threads 2   │
+ │     100  learner       S     20     0          0.0  ▏      0.0   64.0M    4.0M     1      4    0:00.00  -bash                │
+ │       1  root          S     20     0          0.0  ▏      0.0   64.0M    4.0M     1      4    0:00.00  init                 │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ │                                                                                                                              │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    /  filter    t  tree    c  paths    f  family    k  sign

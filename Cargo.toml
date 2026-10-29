@@ -1,0 +1,27 @@
+[package]
+name = "rtop"
+version = "0.1.0"
+edition = "2024"
+description = "A process explorer TUI for learning how the OS manages processes"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+libc = "0.2"
+nix = { version = "0.31", features = ["signal", "process", "resource", "user"] }
+procfs-core = "0.18"
+ratatui = "0.30"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.18"
+
+[dev-dependencies]
+insta = "1"
+
+[profile.release]
+lto = "thin"
+strip = true
