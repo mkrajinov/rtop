@@ -24,6 +24,12 @@ Size: **S** is an evening, **M** a few days, **L** a week or more.
 - [x] Idle CPU about 1%, including under a key-repeat flood
 - [x] Docker dev container (`make linux-up`, `make linux-exec`) with `rtop` on PATH
 
+## Next: Kubernetes targets (spec: `specs/001-k8s-targets`)
+
+- [ ] `rtop --pod ns/name`: processes of all containers in a pod, with a CONTAINER column; exec first, ephemeral debug container for distroless images
+- [ ] `rtop --node name`: every process on a node, labelled with its pod and container or `host`, through a short-lived helper pod
+- [ ] Target picker, and a container-aware dashboard (limits, throttling, OOM kills)
+
 ## Phase 1: finish the dashboard (small, visible wins)
 
 | | Feature | Teaches | Linux source | macOS source | Size |
