@@ -127,28 +127,159 @@ pub struct Accent {
     fg: u32,
     strong: u32,
     tint: u32,
+    /// Shade 900, between `strong` (800) and `tint` (950).
+    deep: u32,
+    /// Shades 200–500: a status colour in one of these belongs to this hue.
+    family: [u32; 4],
 }
 
 /// Every Tailwind hue, in Tailwind's order.
 pub const ACCENTS: &[Accent] = &[
-    Accent { name: "red", fg: 0xff6467, strong: 0x9f0712, tint: 0x460809 },
-    Accent { name: "orange", fg: 0xff8904, strong: 0x9f2d00, tint: 0x441306 },
-    Accent { name: "amber", fg: 0xffb900, strong: 0x973c00, tint: 0x461901 },
-    Accent { name: "yellow", fg: 0xfdc700, strong: 0x894b00, tint: 0x432004 },
-    Accent { name: "lime", fg: 0x9ae600, strong: 0x3c6300, tint: 0x192e03 },
-    Accent { name: "green", fg: 0x05df72, strong: 0x016630, tint: 0x032e15 },
-    Accent { name: "emerald", fg: 0x00d492, strong: 0x006045, tint: 0x002c22 },
-    Accent { name: "teal", fg: 0x00d5be, strong: 0x005f5a, tint: 0x022f2e },
-    Accent { name: "cyan", fg: 0x00d3f2, strong: 0x005f78, tint: 0x053345 },
-    Accent { name: "sky", fg: 0x00bcff, strong: 0x00598a, tint: 0x052f4a },
-    Accent { name: "blue", fg: 0x51a2ff, strong: 0x193cb8, tint: 0x162456 },
-    Accent { name: "indigo", fg: 0x7c86ff, strong: 0x372aac, tint: 0x1e1a4d },
-    Accent { name: "violet", fg: 0xa684ff, strong: 0x5d0ec0, tint: 0x2f0d68 },
-    Accent { name: "purple", fg: 0xc27aff, strong: 0x6e11b0, tint: 0x3c0366 },
-    Accent { name: "fuchsia", fg: 0xed6aff, strong: 0x8a0194, tint: 0x4b004f },
-    Accent { name: "pink", fg: 0xfb64b6, strong: 0xa3004c, tint: 0x510424 },
-    Accent { name: "rose", fg: 0xff637e, strong: 0xa50036, tint: 0x4d0218 },
+    Accent {
+        name: "red",
+        fg: 0xff6467,
+        strong: 0x9f0712,
+        tint: 0x460809,
+        deep: 0x82181a,
+        family: [0xffc9c9, 0xffa2a2, 0xff6467, 0xfb2c36],
+    },
+    Accent {
+        name: "orange",
+        fg: 0xff8904,
+        strong: 0x9f2d00,
+        tint: 0x441306,
+        deep: 0x7e2a0c,
+        family: [0xffd6a7, 0xffb86a, 0xff8904, 0xff6900],
+    },
+    Accent {
+        name: "amber",
+        fg: 0xffb900,
+        strong: 0x973c00,
+        tint: 0x461901,
+        deep: 0x7b3306,
+        family: [0xfee685, 0xffd230, 0xffb900, 0xfe9a00],
+    },
+    Accent {
+        name: "yellow",
+        fg: 0xfdc700,
+        strong: 0x894b00,
+        tint: 0x432004,
+        deep: 0x733e0a,
+        family: [0xfff085, 0xffdf20, 0xfdc700, 0xf0b100],
+    },
+    Accent {
+        name: "lime",
+        fg: 0x9ae600,
+        strong: 0x3c6300,
+        tint: 0x192e03,
+        deep: 0x35530e,
+        family: [0xd8f999, 0xbbf451, 0x9ae600, 0x7ccf00],
+    },
+    Accent {
+        name: "green",
+        fg: 0x05df72,
+        strong: 0x016630,
+        tint: 0x032e15,
+        deep: 0x0d542b,
+        family: [0xb9f8cf, 0x7bf1a8, 0x05df72, 0x00c950],
+    },
+    Accent {
+        name: "emerald",
+        fg: 0x00d492,
+        strong: 0x006045,
+        tint: 0x002c22,
+        deep: 0x004f3b,
+        family: [0xa4f4cf, 0x5ee9b5, 0x00d492, 0x00bc7d],
+    },
+    Accent {
+        name: "teal",
+        fg: 0x00d5be,
+        strong: 0x005f5a,
+        tint: 0x022f2e,
+        deep: 0x0b4f4a,
+        family: [0x96f7e4, 0x46ecd5, 0x00d5be, 0x00bba7],
+    },
+    Accent {
+        name: "cyan",
+        fg: 0x00d3f2,
+        strong: 0x005f78,
+        tint: 0x053345,
+        deep: 0x104e64,
+        family: [0xa2f4fd, 0x53eafd, 0x00d3f2, 0x00b8db],
+    },
+    Accent {
+        name: "sky",
+        fg: 0x00bcff,
+        strong: 0x00598a,
+        tint: 0x052f4a,
+        deep: 0x024a70,
+        family: [0xb8e6fe, 0x74d4ff, 0x00bcff, 0x00a6f4],
+    },
+    Accent {
+        name: "blue",
+        fg: 0x51a2ff,
+        strong: 0x193cb8,
+        tint: 0x162456,
+        deep: 0x1c398e,
+        family: [0xbedbff, 0x8ec5ff, 0x51a2ff, 0x2b7fff],
+    },
+    Accent {
+        name: "indigo",
+        fg: 0x7c86ff,
+        strong: 0x372aac,
+        tint: 0x1e1a4d,
+        deep: 0x312c85,
+        family: [0xc6d2ff, 0xa3b3ff, 0x7c86ff, 0x615fff],
+    },
+    Accent {
+        name: "violet",
+        fg: 0xa684ff,
+        strong: 0x5d0ec0,
+        tint: 0x2f0d68,
+        deep: 0x4d179a,
+        family: [0xddd6ff, 0xc4b4ff, 0xa684ff, 0x8e51ff],
+    },
+    Accent {
+        name: "purple",
+        fg: 0xc27aff,
+        strong: 0x6e11b0,
+        tint: 0x3c0366,
+        deep: 0x59168b,
+        family: [0xe9d4ff, 0xdab2ff, 0xc27aff, 0xad46ff],
+    },
+    Accent {
+        name: "fuchsia",
+        fg: 0xed6aff,
+        strong: 0x8a0194,
+        tint: 0x4b004f,
+        deep: 0x721378,
+        family: [0xf6cfff, 0xf4a8ff, 0xed6aff, 0xe12afb],
+    },
+    Accent {
+        name: "pink",
+        fg: 0xfb64b6,
+        strong: 0xa3004c,
+        tint: 0x510424,
+        deep: 0x861043,
+        family: [0xfccee8, 0xfda5d5, 0xfb64b6, 0xf6339a],
+    },
+    Accent {
+        name: "rose",
+        fg: 0xff637e,
+        strong: 0xa50036,
+        tint: 0x4d0218,
+        deep: 0x8b0836,
+        family: [0xffccd3, 0xffa1ad, 0xff637e, 0xff2056],
+    },
 ];
+
+/// Dark shades of `c`'s Tailwind hue, `[800, 900, 950]`, for filling the
+/// area under a graph. `None` if `c` is not a Tailwind 200–500 shade.
+pub fn ramp(c: Color) -> Option<[Color; 3]> {
+    let Color::Rgb(r, g, b) = c else { return None };
+    let v = (r as u32) << 16 | (g as u32) << 8 | b as u32;
+    ACCENTS.iter().find(|a| a.family.contains(&v)).map(|a| [a.strong, a.deep, a.tint].map(hex))
+}
 
 static THEME: AtomicUsize = AtomicUsize::new(0);
 static ACCENT: AtomicUsize = AtomicUsize::new(1); // orange

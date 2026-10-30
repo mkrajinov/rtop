@@ -238,7 +238,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         h("f", "show only the selected process and its descendants"),
         h("c", "show / hide executable paths in COMMAND"),
         h("T", "theme: pick a colour theme and accent, Enter saves"),
-        h("D", "graph style: braille, Chart braille, Chart octant"),
+        h("D", "graph style: glow, braille, chart, octant"),
         h("k", "send a signal"),
         h("+  -", "renice (lowering nice needs privileges)"),
         h("p", "pause refreshing"),

@@ -2,6 +2,7 @@
 //! on tall terminals a second row with network, disk and GPU.
 
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
@@ -215,6 +216,10 @@ const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇"
 /// can be compared on the same data.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GraphStyle {
+    /// A bright braille line of the recent average, over a band from the
+    /// recent minimum to maximum and a dim fill below, both cell
+    /// backgrounds: smooth, keeps every peak, and needs no special font.
+    Glow,
     /// rtop's own braille plot, coloured row by row.
     Braille,
     /// ratatui's `Chart` with `GraphType::Area` and braille dots.
@@ -224,7 +229,8 @@ pub enum GraphStyle {
     ChartOctant,
 }
 
-const STYLES: [GraphStyle; 3] = [GraphStyle::Braille, GraphStyle::ChartBraille, GraphStyle::ChartOctant];
+const STYLES: [GraphStyle; 4] =
+    [GraphStyle::Glow, GraphStyle::Braille, GraphStyle::ChartBraille, GraphStyle::ChartOctant];
 static STYLE: AtomicUsize = AtomicUsize::new(0);
 
 pub fn graph_style() -> GraphStyle {
@@ -235,6 +241,7 @@ pub fn graph_style() -> GraphStyle {
 pub fn next_graph_style() -> &'static str {
     STYLE.store((STYLE.load(Ordering::Relaxed) + 1) % STYLES.len(), Ordering::Relaxed);
     match graph_style() {
+        GraphStyle::Glow => "graphs: glow (line: average of 4 samples, band: their min–max)",
         GraphStyle::Braille => "graphs: rtop braille (coloured by height)",
         GraphStyle::ChartBraille => "graphs: ratatui Chart, area, braille marker",
         GraphStyle::ChartOctant => "graphs: ratatui Chart, area, octant marker (needs Unicode 16 glyphs)",
@@ -251,6 +258,7 @@ fn sparkline(values: &[f32], width: usize) -> Vec<Line<'static>> {
 /// is coloured by the height it represents, so peaks turn amber and red.
 fn draw_graph(f: &mut Frame, area: Rect, values: &[f32]) {
     match graph_style() {
+        GraphStyle::Glow => glow_plot(f.buffer_mut(), area, values, theme::level),
         GraphStyle::Braille => {
             let lines = plot(values, area.width as usize, area.height as usize, |top, _| theme::level(top));
             f.render_widget(Paragraph::new(lines), area);
@@ -271,11 +279,79 @@ fn draw_rate_graph(f: &mut Frame, area: Rect, values: &[f32], color: Color) {
     let peak = visible(values, area.width as usize).iter().fold(0f32, |a, &b| a.max(b));
     let pct: Vec<f32> = values.iter().map(|&v| log_pct(v, peak)).collect();
     match graph_style() {
+        GraphStyle::Glow => glow_plot(f.buffer_mut(), area, &pct, |_| color),
         GraphStyle::Braille => {
             let lines = plot(&pct, area.width as usize, area.height as usize, |_, _| color);
             f.render_widget(Paragraph::new(lines), area);
         }
         style => draw_chart(f, area, &pct, Some(color), style),
+    }
+}
+
+/// Samples each point of the glow style summarises: the line is their
+/// mean, the band spans their minimum to maximum.
+const WINDOW: usize = 4;
+
+/// The glow style, two points per cell like the braille plot. Raw samples
+/// jitter, so drawing each one gives spiky noise; here the line follows the
+/// mean of the last [`WINDOW`] samples and a band keeps their range, so no
+/// peak is lost. The band is a halo in the 950 shade of the row's colour
+/// (`color(row_top)`) as cell background, the line braille dots in the
+/// colour itself. The newest point is drawn in
+/// the brightest text colour.
+fn glow_plot(buf: &mut Buffer, area: Rect, pct: &[f32], color: impl Fn(f32) -> Color) {
+    let (w, h) = (area.width as usize, area.height as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let top = (h * 4 - 1) as f32;
+    let dot = |v: f32| (v.clamp(0.0, 100.0) / 100.0 * top).round() as usize;
+    // Per point: (line, band low, band high) as dot rows from the bottom.
+    let start = pct.len().saturating_sub(w * 2);
+    let mut points: Vec<Option<(usize, usize, usize)>> = vec![None; w * 2 - (pct.len() - start)];
+    points.extend((start..pct.len()).map(|i| {
+        let win = &pct[(i + 1).saturating_sub(WINDOW)..=i];
+        let mean = win.iter().sum::<f32>() / win.len() as f32;
+        let (lo, hi) = win.iter().fold((f32::MAX, f32::MIN), |(a, b), &v| (a.min(v), b.max(v)));
+        Some((dot(mean), dot(lo), dot(hi)))
+    }));
+    // The line's span in each point's dot column: from the previous point's
+    // level to its own, so the line stays connected through steep changes.
+    let spans: Vec<Option<(usize, usize)>> = (0..points.len())
+        .map(|i| {
+            let (now, _, _) = points[i]?;
+            let before = i.checked_sub(1).and_then(|j| points[j]).map_or(now, |p| p.0);
+            Some((now.min(before), now.max(before)))
+        })
+        .collect();
+    let band = 100.0 / h as f32;
+    for c in 0..w {
+        let x = area.x + c as u16;
+        let pair = [points[c * 2], points[c * 2 + 1]];
+        for from_bottom in 0..h {
+            let y = area.y + (h - 1 - from_bottom) as u16;
+            let (lo_dot, hi_dot) = (from_bottom * 4, from_bottom * 4 + 3);
+            let mut bits = 0;
+            for side in 0..2 {
+                if let Some((a, b)) = spans[c * 2 + side] {
+                    for d in a.max(lo_dot)..=b.min(hi_dot) {
+                        bits |= DOTS[side][d - lo_dot];
+                    }
+                }
+            }
+            let in_band = pair.iter().flatten().any(|&(_, lo, hi)| lo <= hi_dot && hi >= lo_dot);
+            let hue = color(band * (from_bottom + 1) as f32);
+            let cell = &mut buf[(x, y)];
+            if let Some(r) = theme::ramp(hue).filter(|_| in_band) {
+                cell.set_bg(r[2]);
+            }
+            if bits != 0 {
+                let fg = if c == w - 1 { theme::pal().bright } else { hue };
+                cell.set_symbol(&char::from_u32(0x2800 + bits).unwrap_or(' ').to_string()).set_fg(fg);
+            } else if in_band {
+                cell.set_symbol(" ");
+            }
+        }
     }
 }
 
@@ -790,6 +866,21 @@ mod graph_tests {
     fn a_quiet_graph_shows_its_baseline_and_no_sample_shows_nothing() {
         let got = text(&plot(&[0.0, 0.0], 3, 2, |_, _| Color::Reset));
         assert_eq!(got, ["   ", "  ⣀"]);
+    }
+
+    #[test]
+    fn glow_draws_the_mean_as_dots_over_a_min_max_band() {
+        // One cell, 2 lines (8 dot rows, 0–7). The second point's window is
+        // [0, 100]: mean 50% (dot 4, top line), range 0–7 (the band covers
+        // both lines). The line climbs from the first point (dot 0).
+        let area = Rect::new(0, 0, 1, 2);
+        let mut buf = Buffer::empty(area);
+        let good = theme::pal().good;
+        glow_plot(&mut buf, area, &[0.0, 100.0], |_| good);
+        let ramp = theme::ramp(good).expect("status colours are Tailwind shades");
+        let (top, bottom) = (&buf[(0, 0)], &buf[(0, 1)]);
+        assert_eq!((bottom.symbol(), bottom.bg), ("⣸", ramp[2]), "left: dot 0; right: climbs from 0 to 4");
+        assert_eq!((top.symbol(), top.bg, top.fg), ("⢀", ramp[2], theme::pal().bright), "newest point is bright");
     }
 
     #[test]
