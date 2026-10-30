@@ -114,6 +114,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("t", "tree"),
                 ("f", "family"),
                 ("T", "theme"),
+                ("D", "graphs"),
                 ("?", "help"),
                 ("q", "quit"),
             ]
@@ -132,6 +133,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("f", "family"),
                 ("k", "signal"),
                 ("T", "theme"),
+                ("D", "graphs"),
                 ("?", "help"),
                 ("q", "quit"),
             ]
@@ -149,6 +151,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("k", "signal"),
                 ("+-", "nice"),
                 ("T", "theme"),
+                ("D", "graphs"),
                 ("?", "help"),
                 ("q", "quit"),
             ]
