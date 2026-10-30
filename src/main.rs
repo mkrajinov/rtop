@@ -26,7 +26,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Processes of a Kubernetes pod: pick a namespace and pod, or name one with --pod.
+    /// Processes of a Kubernetes pod or node: pick one, or name it with --pod / --node.
     K8s(K8sArgs),
     /// Start a guided lab: rtop spawns a misbehaving process tree and asks questions.
     Lab {
