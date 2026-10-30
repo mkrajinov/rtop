@@ -72,6 +72,9 @@ pub struct Picker {
     /// Where a node's helper pod would be created (`--helper-namespace`,
     /// else the context's namespace).
     pub helper_ns: String,
+    /// The context's namespace: where the picker goes when it may not
+    /// list namespaces.
+    pub home: String,
     /// A node waiting for the user to confirm its helper pod.
     pub confirm: Option<String>,
     pub focus: Pane,
@@ -116,7 +119,11 @@ impl Picker {
                 None => bail!("the cluster did not answer within 15 s"),
             }
         };
-        let mut p = Picker::new(&context, implicit_context, &server, &namespace.unwrap_or(default_ns));
+        // Without -n the picker starts on all namespaces; the context's
+        // namespace still receives node helper pods.
+        let mut p = Picker::new(&context, implicit_context, &server, namespace.as_deref().unwrap_or(""));
+        p.home.clone_from(&default_ns);
+        p.helper_ns = namespace.unwrap_or(default_ns);
         p.k = Some(k);
         p.request(Request::ListNamespaces, Pending::Namespaces);
         p.list();
@@ -130,16 +137,17 @@ impl Picker {
             context: context.into(),
             implicit_context,
             server: server.into(),
-            namespaces: vec![String::new(), ns.to_string()],
+            namespaces: if ns.is_empty() { vec![String::new()] } else { vec![String::new(), ns.to_string()] },
             ns_note: None,
             ns: ns.into(),
             pods: None,
             view: View::Pods,
             nodes: None,
             helper_ns: ns.into(),
+            home: ns.into(),
             confirm: None,
             focus: Pane::Pods,
-            ns_sel: 1,
+            ns_sel: usize::from(!ns.is_empty()),
             pod_sel: 0,
             ns_filter: String::new(),
             pod_filter: String::new(),
@@ -241,7 +249,12 @@ impl Picker {
             // Common for namespace-scoped users: keep the context's
             // namespace and let them type others.
             Reply::Err(e) if e.code == ErrorCode::Forbidden => {
-                self.ns_note = Some("you may not list namespaces: type one with /".into())
+                self.ns_note = Some("you may not list namespaces: type one with /".into());
+                if self.ns.is_empty() && !self.home.is_empty() {
+                    self.namespaces.push(self.home.clone());
+                    self.ns_sel = 1;
+                    self.show_namespace(self.home.clone());
+                }
             }
             Reply::Err(e) => self.ns_note = Some(format!("namespaces: {e}")),
             _ => {}
@@ -539,6 +552,18 @@ mod tests {
         press(&mut p, KeyCode::Down);
         press(&mut p, KeyCode::Enter);
         assert!(p.confirm.is_none() && p.status_text().unwrap().contains("NotReady"));
+    }
+
+    #[test]
+    fn without_a_namespace_the_picker_starts_on_all_of_them() {
+        let mut p = Picker::new("kind-rtop", false, "v1.32.2", "");
+        p.set_namespaces(vec!["default".into(), "rtop-demo".into()]);
+        assert_eq!((p.ns.as_str(), p.ns_sel, p.namespaces.len()), ("", 0, 3));
+        // A namespace-scoped user may list neither: go to the context's.
+        let mut p = Picker::new("kind-rtop", false, "v1.32.2", "");
+        p.home = "team-a".into();
+        p.got_namespaces(Reply::Err(crate::kube::msg::KubeError::new(ErrorCode::Forbidden, "no")));
+        assert_eq!((p.ns.as_str(), p.ns_sel), ("team-a", 1));
     }
 
     #[test]

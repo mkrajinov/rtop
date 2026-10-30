@@ -54,7 +54,7 @@ struct K8sArgs {
     /// Namespace for the node helper pod; it must allow hostPID [default: --namespace, else the context's].
     #[arg(long, value_name = "NAMESPACE")]
     helper_namespace: Option<String>,
-    /// Namespace of --pod, or the one the picker starts in [default: the context's namespace].
+    /// Namespace of --pod [default: the context's], or the one the picker starts in [default: all namespaces].
     #[arg(short = 'n', long)]
     namespace: Option<String>,
     /// Start narrowed to one container of the pod (C switches inside rtop).

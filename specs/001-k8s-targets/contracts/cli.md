@@ -19,7 +19,7 @@ namespace and `/` accepts a typed namespace name.
 | `--pod [NS/]POD` | | Pod target. `NS/` overrides `-n`. |
 | `-c, --container NAME` | all containers | Start narrowed to one container (FR-005). Needs `--pod`. |
 | `--node NODE` | | Node target (Story 2). Always read-only: `--allow-actions` does not apply. |
-| `-n, --namespace NS` | kubeconfig namespace, else `default` | Namespace of `--pod`; the namespace the picker starts in. |
+| `-n, --namespace NS` | `--pod`: kubeconfig namespace, else `default`; picker: all namespaces | Namespace of `--pod`; the namespace the picker starts in. Node helper pods go to the kubeconfig namespace unless `-n` or `--helper-namespace` is given. |
 | `--helper-namespace NS` | `-n` value, else the context's namespace | Where the node helper pod is created; must allow `hostPID` (Pod Security `privileged`). |
 | `--context CTX` | kubeconfig current context | Resolved once when the client is built; no other context is used. Always shown in the header, highlighted when it was not given explicitly. |
 | `--debug-image IMAGE` | `busybox:1.37` | Image for the debug container and the helper pod. |
