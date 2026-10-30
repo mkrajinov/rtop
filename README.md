@@ -129,7 +129,7 @@ kubeconfig rather than `--context`.
 |---|---|---|
 | picker (`rtop k8s`) | lists namespaces, pods and nodes (from the API server's cache) | nothing |
 | pod (`--pod NS/POD`, or Enter in the picker) | one `sh` reader per container over `pods/exec` | nothing, unless an image has no shell: then an ephemeral `busybox` debug container that shares that container's PID namespace. It cannot be removed and stays in the pod spec (terminated after an hour) until the pod is deleted. `--no-debug-container` turns this off. |
-| node (`--node NODE`, or `⎈ nodes` + `y` in the picker) | one reader in a helper pod with `hostPID` | a pod `rtop-node-<node>-<id>` in `--helper-namespace` (root, only `SYS_PTRACE`, 1 CPU / 64Mi limit, labelled `app.kubernetes.io/managed-by=rtop`). Deleted on exit, Ctrl-C, SIGTERM and Esc; `activeDeadlineSeconds: 3600` if rtop is killed hard. If deletion fails rtop prints the `kubectl delete` command. |
+| node (`--node NODE`, or the picker's Nodes view (`2`), Enter, `y`) | one reader in a helper pod with `hostPID` | a pod `rtop-node-<node>-<id>` in `--helper-namespace` (root, only `SYS_PTRACE`, 1 CPU / 64Mi limit, labelled `app.kubernetes.io/managed-by=rtop`). Deleted on exit, Ctrl-C, SIGTERM and Esc; `activeDeadlineSeconds: 3600` if rtop is killed hard. If deletion fails rtop prints the `kubectl delete` command. |
 
 - **Read-only.** Signals are off in pod mode unless `--allow-actions`; node mode never sends them
   (root in a hostPID pod could signal the kubelet).

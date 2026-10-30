@@ -3,12 +3,12 @@ source: tests/ui.rs
 expression: screen
 ---
  ⎈ kind-rtop · v1.32.2
- ╭ Namespaces ────────╮╭ Nodes (4) ─────────────────────────────────────────────────────────────────────────╮
- │ all namespaces     ││ NAME           STATUS                    ROLES          AGE   VERSION   CPU   MEMO │
- │ ⎈ nodes            ││ control-plane  Ready                     control-plane  5d    v1.32.2   8     31.3 │
- │ default            ││ worker-1       Ready                     <none>         5d    v1.32.2   8     31.3 │
- │ rtop-demo          ││ worker-2       Ready,SchedulingDisabled  <none>         5d    v1.32.2   8     31.3 │
- │                    ││ worker-3       NotReady                  <none>         5d    v1.32.2   8     31.3 │
- │                    ││                                                                                    │
- ╰────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯
+  1  Pods    2  Nodes
+ ╭ Nodes (4) ───────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ NAME           STATUS                    ROLES          AGE   VERSION   CPU   MEMORY                     │
+ │ control-plane  Ready                     control-plane  5d    v1.32.2   8     31.3G                      │
+ │ worker-1       Ready                     <none>         5d    v1.32.2   8     31.3G                      │
+ │ worker-2       Ready,SchedulingDisabled  <none>         5d    v1.32.2   8     31.3G                      │
+ │ worker-3       NotReady                  <none>         5d    v1.32.2   8     31.3G                      │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯
   create a hostPID helper pod in kind-rtop / rtop-demo on node worker-1?   y create · any other key cancels

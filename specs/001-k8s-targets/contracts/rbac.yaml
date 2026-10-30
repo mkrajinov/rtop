@@ -34,7 +34,7 @@ rules:
     verbs: ["patch"]
 ---
 # rtop k8s (the picker). All optional: without namespaces/list the picker shows the context's
-# namespace and accepts a typed one; without nodes/list the nodes entry shows the error.
+# namespace and accepts a typed one; without nodes/list the Nodes view shows the error.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -1,5 +1,6 @@
-//! The `rtop k8s` picker: namespaces on the left, their pods (or the
-//! cluster's nodes) on the right.
+//! The `rtop k8s` picker: two views under a tab line. Pods shows
+//! namespaces on the left and their pods on the right; Nodes shows the
+//! cluster's nodes across the full width.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -11,18 +12,25 @@ use ratatui::widgets::{
 
 use super::theme;
 use crate::kube::msg::{NodeSummary, PodSummary};
-use crate::picker::{NODES, Pane, Picker};
+use crate::picker::{Pane, Picker, View};
 
 pub fn draw(f: &mut Frame, p: &Picker) {
     let full = f.area();
     let area = Rect { x: full.x + 1, width: full.width.saturating_sub(2), ..full };
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).split(area);
+    let rows =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)])
+            .split(area);
     draw_context(f, p, rows[0]);
-    let ns_width = p.namespaces.iter().map(|n| n.len()).max().unwrap_or(0).clamp(16, 32) as u16 + 6;
-    let cols = Layout::horizontal([Constraint::Length(ns_width), Constraint::Min(20)]).split(rows[1]);
-    draw_namespaces(f, p, cols[0]);
-    draw_pods(f, p, cols[1]);
-    draw_footer(f, p, rows[2]);
+    draw_tabs(f, p, rows[1]);
+    if p.view == View::Nodes {
+        draw_nodes(f, p, rows[2]);
+    } else {
+        let ns_width = p.namespaces.iter().map(|n| n.len()).max().unwrap_or(0).clamp(16, 32) as u16 + 6;
+        let cols = Layout::horizontal([Constraint::Length(ns_width), Constraint::Min(20)]).split(rows[2]);
+        draw_namespaces(f, p, cols[0]);
+        draw_pods(f, p, cols[1]);
+    }
+    draw_footer(f, p, rows[3]);
     theme::finalize(f.buffer_mut());
 }
 
@@ -41,6 +49,23 @@ fn draw_context(f: &mut Frame, p: &Picker, area: Rect) {
     spans.extend([Span::styled(" · ", theme::faint()), Span::styled(p.server.clone(), theme::dim())]);
     if let Some(n) = &p.ns_note {
         spans.extend([Span::styled(" · ", theme::faint()), Span::styled(n.clone(), Style::default().fg(pal.warn))]);
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// `1 Pods  2 Nodes`: the shown view is a filled chip, the other plain.
+fn draw_tabs(f: &mut Frame, p: &Picker, area: Rect) {
+    let pal = theme::pal();
+    let mut spans = vec![];
+    for (key, view, name) in [("1", View::Pods, "Pods"), ("2", View::Nodes, "Nodes")] {
+        let style = if p.view == view {
+            Style::default().fg(pal.accent).bg(pal.key_bg).add_modifier(Modifier::BOLD)
+        } else {
+            theme::dim()
+        };
+        spans.push(Span::styled(format!(" {key} "), theme::faint()));
+        spans.push(Span::styled(format!(" {name} "), style));
+        spans.push(Span::raw("  "));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -68,7 +93,6 @@ fn draw_namespaces(f: &mut Frame, p: &Picker, area: Rect) {
         .iter()
         .map(|n| match n.as_str() {
             "" => ListItem::new(Span::styled("all namespaces", theme::dim())),
-            NODES => ListItem::new(Span::styled("⎈ nodes", Style::default().fg(theme::pal().accent))),
             n => ListItem::new(n.to_string()),
         })
         .collect();
@@ -78,9 +102,6 @@ fn draw_namespaces(f: &mut Frame, p: &Picker, area: Rect) {
 }
 
 fn draw_pods(f: &mut Frame, p: &Picker, area: Rect) {
-    if p.showing_nodes() {
-        return draw_nodes(f, p, area);
-    }
     let focused = p.focus == Pane::Pods;
     let all = p.ns.is_empty();
     let rows = p.visible_pods();
@@ -129,17 +150,17 @@ fn draw_pods(f: &mut Frame, p: &Picker, area: Rect) {
 }
 
 fn draw_nodes(f: &mut Frame, p: &Picker, area: Rect) {
-    let focused = p.focus == Pane::Pods;
     let rows = p.visible_nodes();
     let title = match &p.nodes {
         Some(Ok(_)) => format!("Nodes ({})", rows.len()),
         _ => "Nodes".into(),
     };
-    let block = pane(&title, focused);
+    let block = pane(&title, true);
     let message = match &p.nodes {
         None => Some(("loading…".to_string(), theme::dim())),
         Some(Err(e)) => Some((e.clone(), Style::default().fg(theme::pal().bad))),
-        Some(Ok(_)) if rows.is_empty() => Some((format!("no node matches “{}”", p.pod_filter), theme::dim())),
+        Some(Ok(_)) if rows.is_empty() && p.node_filter.is_empty() => Some(("no nodes".into(), theme::dim())),
+        Some(Ok(_)) if rows.is_empty() => Some((format!("no node matches “{}”", p.node_filter), theme::dim())),
         _ => None,
     };
     if let Some((text, style)) = message {
@@ -163,8 +184,8 @@ fn draw_nodes(f: &mut Frame, p: &Picker, area: Rect) {
         .header(Row::new(header).style(theme::dim().add_modifier(Modifier::BOLD)))
         .column_spacing(2)
         .block(block)
-        .row_highlight_style(highlight(focused));
-    let mut state = TableState::default().with_selected(Some(p.pod_sel));
+        .row_highlight_style(highlight(true));
+    let mut state = TableState::default().with_selected(Some(p.node_sel));
     f.render_stateful_widget(table, area, &mut state);
 }
 
@@ -253,19 +274,28 @@ fn draw_footer(f: &mut Frame, p: &Picker, area: Rect) {
     } else if let Some(msg) = p.status_text() {
         Line::from(Span::styled(format!(" {msg}"), Style::default().fg(pal.warn)))
     } else if p.filtering {
-        let (what, text) = match p.focus {
-            Pane::Namespaces => ("namespace", &p.ns_filter),
-            Pane::Pods => ("pod", &p.pod_filter),
-        };
+        let (what, text) = p.filter();
         Line::from(vec![
             Span::styled(format!(" {what} filter: "), theme::title()),
-            Span::raw(text.clone()),
+            Span::raw(text.to_string()),
             Span::styled("▏", Style::default().fg(pal.accent)),
             Span::styled("   Enter keep · Esc clear", theme::dim()),
         ])
     } else {
-        let keys =
-            [("↑↓", "select"), ("Tab", "pane"), ("/", "filter"), ("Enter", "open"), ("r", "refresh"), ("q", "quit")];
+        let keys: &[_] = match p.view {
+            View::Pods => &[
+                ("↑↓", "select"),
+                ("Tab", "pane"),
+                ("/", "filter"),
+                ("Enter", "open"),
+                ("2", "nodes"),
+                ("r", "refresh"),
+                ("q", "quit"),
+            ],
+            View::Nodes => {
+                &[("↑↓", "select"), ("/", "filter"), ("Enter", "open"), ("1", "pods"), ("r", "refresh"), ("q", "quit")]
+            }
+        };
         let mut spans = vec![];
         for (k, what) in keys {
             spans.push(Span::styled(
