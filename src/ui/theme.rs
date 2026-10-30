@@ -317,3 +317,49 @@ fn to_256(c: Color) -> Color {
         Color::Indexed(16 + 36 * ri as u8 + 6 * gi as u8 + bi as u8)
     }
 }
+
+/// The `T` overlay, shared by the process view and the k8s picker: arrow
+/// keys apply a theme live, Enter saves it, Esc restores the old one.
+pub struct Chooser {
+    /// Which list has focus: 0 theme, 1 accent.
+    pub focus: usize,
+    before: (usize, usize),
+}
+
+/// What a key did to the [`Chooser`].
+pub enum Chosen {
+    Open,
+    /// Closed; the message says where the theme was saved, if it was.
+    Closed(Option<String>),
+}
+
+impl Chooser {
+    pub fn open() -> Self {
+        Chooser { focus: 0, before: current() }
+    }
+
+    pub fn key(&mut self, key: crossterm::event::KeyEvent) -> Chosen {
+        use crossterm::event::KeyCode;
+        let (g, a) = current();
+        let step = |i: usize, n: usize, up: bool| if up { (i + n - 1) % n } else { (i + 1) % n };
+        match key.code {
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => self.focus ^= 1,
+            KeyCode::Up | KeyCode::Down if self.focus == 0 => set(step(g, THEMES.len(), key.code == KeyCode::Up), a),
+            KeyCode::Up | KeyCode::Down => set(g, step(a, ACCENTS.len(), key.code == KeyCode::Up)),
+            KeyCode::Esc | KeyCode::Char('q') => {
+                set(self.before.0, self.before.1);
+                return Chosen::Closed(None);
+            }
+            KeyCode::Enter => {
+                let (name, accent) = names();
+                let cfg = crate::config::Config { theme: Some(name.into()), accent: Some(accent.into()) };
+                return Chosen::Closed(Some(match crate::config::save(&cfg) {
+                    Ok(p) => format!("theme {name} + {accent} saved to {}", p.display()),
+                    Err(e) => format!("theme applied, but saving failed: {e}"),
+                }));
+            }
+            _ => {}
+        }
+        Chosen::Open
+    }
+}

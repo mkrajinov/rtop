@@ -31,6 +31,9 @@ pub fn draw(f: &mut Frame, p: &Picker) {
         draw_pods(f, p, cols[1]);
     }
     draw_footer(f, p, rows[3]);
+    if let Some(t) = &p.theme {
+        super::draw_theme(f, t, full);
+    }
     theme::finalize(f.buffer_mut());
 }
 
@@ -289,12 +292,19 @@ fn draw_footer(f: &mut Frame, p: &Picker, area: Rect) {
                 ("/", "filter"),
                 ("Enter", "open"),
                 ("2", "nodes"),
+                ("T", "theme"),
                 ("r", "refresh"),
                 ("q", "quit"),
             ],
-            View::Nodes => {
-                &[("↑↓", "select"), ("/", "filter"), ("Enter", "open"), ("1", "pods"), ("r", "refresh"), ("q", "quit")]
-            }
+            View::Nodes => &[
+                ("↑↓", "select"),
+                ("/", "filter"),
+                ("Enter", "open"),
+                ("1", "pods"),
+                ("T", "theme"),
+                ("r", "refresh"),
+                ("q", "quit"),
+            ],
         };
         let mut spans = vec![];
         for (k, what) in keys {

@@ -65,7 +65,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     match app.mode {
         Mode::Signal => draw_signals(f, app, full),
         Mode::Help => draw_help(f, app, full),
-        Mode::Theme => draw_theme(f, app, full),
+        Mode::Theme => draw_theme(f, &app.theme, full),
         _ => {}
     }
     theme::finalize(f.buffer_mut());
@@ -260,7 +260,8 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(text).block(panel("help")).wrap(Wrap { trim: false }), r);
 }
 
-fn draw_theme(f: &mut Frame, app: &App, area: Rect) {
+/// The `T` overlay; the k8s picker draws it too.
+pub fn draw_theme(f: &mut Frame, chooser: &theme::Chooser, area: Rect) {
     let (g, a) = theme::current();
     let r = centered(area, 96, theme::THEMES.len().max(theme::ACCENTS.len()) as u16 + 6);
     f.render_widget(Clear, r);
@@ -289,21 +290,21 @@ fn draw_theme(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let legend = Line::from(Span::styled("  grays  status", theme::faint()));
-    let mut themes = vec![heading("theme", app.theme_focus == 0), legend];
+    let mut themes = vec![heading("theme", chooser.focus == 0), legend];
     themes.extend(theme::THEMES.iter().enumerate().map(|(i, t)| {
         let (grays, status) = t.swatch();
         let block = |c: Color| Span::styled("█", Style::default().fg(c));
         let mut swatch: Vec<Span> = grays.into_iter().map(block).collect();
         swatch.push(Span::raw("  "));
         swatch.extend(status.into_iter().map(block));
-        row(app.theme_focus == 0, i == g, swatch, t.name)
+        row(chooser.focus == 0, i == g, swatch, t.name)
     }));
     scrolled_list(f, themes, g, left);
 
-    let mut accents = vec![heading("accent", app.theme_focus == 1), Line::raw("")];
+    let mut accents = vec![heading("accent", chooser.focus == 1), Line::raw("")];
     accents.extend(theme::ACCENTS.iter().enumerate().map(|(i, accent)| {
         let swatch = vec![Span::styled("████", Style::default().fg(theme::accent_color(i)))];
-        row(app.theme_focus == 1, i == a, swatch, accent.name)
+        row(chooser.focus == 1, i == a, swatch, accent.name)
     }));
     scrolled_list(f, accents, a, right);
 

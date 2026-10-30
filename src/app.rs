@@ -327,10 +327,8 @@ pub struct App {
     pub mode: Mode,
     pub detail: Option<DetailState>,
     pub signal_sel: usize,
-    /// Theme picker: which list has focus (0 theme, 1 accent) and the theme
-    /// to restore on Esc.
-    pub theme_focus: usize,
-    theme_before: (usize, usize),
+    /// The theme overlay's state while `mode` is [`Mode::Theme`].
+    pub theme: theme::Chooser,
     pub status: Option<(String, Instant)>,
     pub lab: Option<LabSession>,
     /// Kubernetes mode: show only this container's processes (`-c`, `C`).
@@ -382,8 +380,7 @@ impl App {
             mode: Mode::Table,
             detail: None,
             signal_sel: 0,
-            theme_focus: 0,
-            theme_before: (0, 0),
+            theme: theme::Chooser::open(),
             status: None,
             lab: None,
             container: None,
@@ -651,7 +648,7 @@ impl App {
                 self.explain_scroll = 0;
             }
             KeyCode::Char('T') => {
-                self.theme_before = theme::current();
+                self.theme = theme::Chooser::open();
                 self.mode = Mode::Theme;
             }
             KeyCode::Char(']') => self.explain_scroll = self.explain_scroll.saturating_add(3),
@@ -676,31 +673,12 @@ impl App {
         if self.detail.is_some() { Mode::Detail } else { Mode::Table }
     }
 
-    /// Arrow keys apply a theme live; Enter saves it, Esc restores the old one.
     fn key_theme(&mut self, key: KeyEvent) {
-        let (g, a) = theme::current();
-        let step = |i: usize, n: usize, up: bool| if up { (i + n - 1) % n } else { (i + 1) % n };
-        match key.code {
-            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => self.theme_focus ^= 1,
-            KeyCode::Up | KeyCode::Down if self.theme_focus == 0 => {
-                theme::set(step(g, theme::THEMES.len(), key.code == KeyCode::Up), a)
-            }
-            KeyCode::Up | KeyCode::Down => theme::set(g, step(a, theme::ACCENTS.len(), key.code == KeyCode::Up)),
-            KeyCode::Esc | KeyCode::Char('q') => {
-                theme::set(self.theme_before.0, self.theme_before.1);
-                self.mode = self.base_mode();
-            }
-            KeyCode::Enter => {
-                let (name, accent) = theme::names();
-                let cfg = crate::config::Config { theme: Some(name.into()), accent: Some(accent.into()) };
-                let msg = match crate::config::save(&cfg) {
-                    Ok(p) => format!("theme {name} + {accent} saved to {}", p.display()),
-                    Err(e) => format!("theme applied, but saving failed: {e}"),
-                };
+        if let theme::Chosen::Closed(msg) = self.theme.key(key) {
+            if let Some(msg) = msg {
                 self.set_status(msg);
-                self.mode = self.base_mode();
             }
-            _ => {}
+            self.mode = self.base_mode();
         }
     }
 

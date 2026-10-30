@@ -75,6 +75,8 @@ pub struct Picker {
     /// The context's namespace: where the picker goes when it may not
     /// list namespaces.
     pub home: String,
+    /// The `T` theme overlay, while it is open.
+    pub theme: Option<crate::ui::theme::Chooser>,
     /// A node waiting for the user to confirm its helper pod.
     pub confirm: Option<String>,
     pub focus: Pane,
@@ -145,6 +147,7 @@ impl Picker {
             nodes: None,
             helper_ns: ns.into(),
             home: ns.into(),
+            theme: None,
             confirm: None,
             focus: Pane::Namespaces,
             ns_sel: usize::from(!ns.is_empty()),
@@ -344,6 +347,15 @@ impl Picker {
         if self.connecting.is_some() {
             return Action::None;
         }
+        if let Some(t) = &mut self.theme {
+            if let crate::ui::theme::Chosen::Closed(msg) = t.key(key) {
+                self.theme = None;
+                if let Some(msg) = msg {
+                    self.set_status(msg);
+                }
+            }
+            return Action::None;
+        }
         if let Some(node) = self.confirm.take() {
             if key.code == KeyCode::Char('y') {
                 return Action::OpenNode { node };
@@ -375,6 +387,7 @@ impl Picker {
         }
         match key.code {
             KeyCode::Char('q') => return Action::Quit,
+            KeyCode::Char('T') => self.theme = Some(crate::ui::theme::Chooser::open()),
             KeyCode::Char('1' | 'p') => self.show_view(View::Pods),
             KeyCode::Char('2' | 'n') => self.show_view(View::Nodes),
             KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right if self.view == View::Pods => {
@@ -568,6 +581,16 @@ mod tests {
         p.home = "team-a".into();
         p.got_namespaces(Reply::Err(crate::kube::msg::KubeError::new(ErrorCode::Forbidden, "no")));
         assert_eq!((p.ns.as_str(), p.ns_sel), ("team-a", 1));
+    }
+
+    #[test]
+    fn t_opens_the_theme_chooser_and_keeps_its_keys() {
+        let mut p = picker();
+        press(&mut p, KeyCode::Char('T'));
+        assert!(p.theme.is_some());
+        // q closes the chooser (restoring the theme), it does not quit.
+        assert_eq!(press(&mut p, KeyCode::Char('q')), Action::None);
+        assert!(p.theme.is_none());
     }
 
     #[test]

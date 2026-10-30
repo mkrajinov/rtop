@@ -13,4 +13,4 @@ expression: screen
  │                    ││                                                                                    │
  │                    ││                                                                                    │
  ╰────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────╯
-  ↑↓  select    Tab  pane    /  filter    Enter  open    2  nodes    r  refresh    q  quit
+  ↑↓  select    Tab  pane    /  filter    Enter  open    2  nodes    T  theme    r  refresh    q  quit
