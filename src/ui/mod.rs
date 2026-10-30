@@ -2,7 +2,7 @@
 
 mod detail;
 mod explain;
-mod header;
+pub mod header;
 mod lab;
 #[cfg(feature = "kube")]
 pub mod picker;
@@ -213,7 +213,7 @@ fn draw_signals(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    let r = centered(area, 78, 34);
+    let r = centered(area, 78, 37);
     f.render_widget(Clear, r);
     let h = |k: &str, d: &str| {
         Line::from(vec![
@@ -235,6 +235,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         h("f", "show only the selected process and its descendants"),
         h("c", "show / hide executable paths in COMMAND"),
         h("T", "theme: pick a colour theme and accent, Enter saves"),
+        h("D", "graph style: braille, Chart braille, Chart octant"),
         h("k", "send a signal"),
         h("+  -", "renice (lowering nice needs privileges)"),
         h("p", "pause refreshing"),

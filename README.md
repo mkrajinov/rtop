@@ -46,6 +46,7 @@ See [Kubernetes](#kubernetes) for what each mode adds to the cluster and the per
 | | `p` | pause refreshing |
 | | `c` | show / hide executable paths |
 | | `T` | theme picker (live preview, Enter saves) |
+| | `D` | graph style: rtop braille, ratatui `Chart` braille, `Chart` octant (experiment) |
 | | `?` | help |
 | detail | `← →` / `1-8` | switch tab |
 | | `↑ ↓` | select a field; the bottom line shows its exact source |

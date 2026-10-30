@@ -4,8 +4,10 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Axis, Chart, Dataset, GraphType, Paragraph};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{panel, theme};
 use crate::app::App;
@@ -209,11 +211,52 @@ fn draw_containers(f: &mut Frame, list: &[ContainerUsage], area: Rect) {
 
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-/// A graph of 0–100% samples, newest on the right. Each row is coloured by
-/// the height it represents, so peaks turn amber and red.
-pub fn graph(values: &[f32], width: usize, height: usize) -> Vec<Line<'static>> {
-    // A one-row sparkline has no height to grade, so colour by value.
-    plot(values, width, height, |top, v| theme::level(if height == 1 { v } else { top }))
+/// How the multi-line graphs are drawn; `D` cycles through them so they
+/// can be compared on the same data.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GraphStyle {
+    /// rtop's own braille plot, coloured row by row.
+    Braille,
+    /// ratatui's `Chart` with `GraphType::Area` and braille dots.
+    ChartBraille,
+    /// The same chart with octants: braille resolution without the gaps
+    /// between dots, but only in fonts with Unicode 16 glyphs.
+    ChartOctant,
+}
+
+const STYLES: [GraphStyle; 3] = [GraphStyle::Braille, GraphStyle::ChartBraille, GraphStyle::ChartOctant];
+static STYLE: AtomicUsize = AtomicUsize::new(0);
+
+pub fn graph_style() -> GraphStyle {
+    STYLES[STYLE.load(Ordering::Relaxed) % STYLES.len()]
+}
+
+/// Switch to the next graph style and name it.
+pub fn next_graph_style() -> &'static str {
+    STYLE.store((STYLE.load(Ordering::Relaxed) + 1) % STYLES.len(), Ordering::Relaxed);
+    match graph_style() {
+        GraphStyle::Braille => "graphs: rtop braille (coloured by height)",
+        GraphStyle::ChartBraille => "graphs: ratatui Chart, area, braille marker",
+        GraphStyle::ChartOctant => "graphs: ratatui Chart, area, octant marker (needs Unicode 16 glyphs)",
+    }
+}
+
+/// A one-line graph of 0–100% samples, newest on the right, coloured by
+/// value.
+fn sparkline(values: &[f32], width: usize) -> Vec<Line<'static>> {
+    plot(values, width, 1, |_, v| theme::level(v))
+}
+
+/// A graph of 0–100% samples filling `area`, newest on the right. Each row
+/// is coloured by the height it represents, so peaks turn amber and red.
+fn draw_graph(f: &mut Frame, area: Rect, values: &[f32]) {
+    match graph_style() {
+        GraphStyle::Braille => {
+            let lines = plot(values, area.width as usize, area.height as usize, |top, _| theme::level(top));
+            f.render_widget(Paragraph::new(lines), area);
+        }
+        style => draw_chart(f, area, values, None, style),
+    }
 }
 
 /// Decades below the peak that a rate graph still shows.
@@ -224,10 +267,49 @@ const RATE_DECADES: f32 = 3.0;
 /// on a linear one a single burst flattens everything else to nothing. Each
 /// quarter of the height is a factor of about 5.6. Throughput isn't good or
 /// bad, so one colour.
-fn rate_graph(values: &[f32], width: usize, height: usize, color: Color) -> Vec<Line<'static>> {
-    let peak = visible(values, width).iter().fold(0f32, |a, &b| a.max(b));
+fn draw_rate_graph(f: &mut Frame, area: Rect, values: &[f32], color: Color) {
+    let peak = visible(values, area.width as usize).iter().fold(0f32, |a, &b| a.max(b));
     let pct: Vec<f32> = values.iter().map(|&v| log_pct(v, peak)).collect();
-    plot(&pct, width, height, |_, _| color)
+    match graph_style() {
+        GraphStyle::Braille => {
+            let lines = plot(&pct, area.width as usize, area.height as usize, |_, _| color);
+            f.render_widget(Paragraph::new(lines), area);
+        }
+        style => draw_chart(f, area, &pct, Some(color), style),
+    }
+}
+
+/// ratatui's `Chart` as a filled area, two samples per cell like the
+/// braille plot. A dataset has one colour and each dataset replaces whole
+/// cells of the ones before, so stacked datasets per colour band leave gaps
+/// at the band edges. Instead the series is drawn once and, with `color:
+/// None`, each row is then recoloured by the height it represents.
+fn draw_chart(f: &mut Frame, area: Rect, pct: &[f32], color: Option<Color>, style: GraphStyle) {
+    let n = area.width as usize * 2;
+    let shown = &pct[pct.len().saturating_sub(n)..];
+    let start = (n - shown.len()) as f64;
+    let data: Vec<(f64, f64)> =
+        shown.iter().enumerate().map(|(i, &v)| (start + i as f64, v.clamp(0.0, 100.0) as f64)).collect();
+    let marker = if style == GraphStyle::ChartOctant { Marker::Octant } else { Marker::Braille };
+    let dataset = Dataset::default()
+        .graph_type(GraphType::Area)
+        .marker(marker)
+        .style(Style::default().fg(color.unwrap_or(theme::pal().good)))
+        .data(&data);
+    let chart = Chart::new(vec![dataset])
+        .x_axis(Axis::default().bounds([0.0, (n.max(2) - 1) as f64]))
+        .y_axis(Axis::default().bounds([0.0, 100.0]));
+    f.render_widget(chart, area);
+    if color.is_none() {
+        let h = area.height.max(1);
+        let buf = f.buffer_mut();
+        for row in 0..h {
+            let fg = theme::level(100.0 * (h - row) as f32 / h as f32);
+            for x in area.left()..area.right() {
+                buf[(x, area.y + row)].set_fg(fg);
+            }
+        }
+    }
 }
 
 /// `v` as 0–100 of a log scale from `peak / 10^RATE_DECADES` to `peak`.
@@ -345,9 +427,9 @@ fn draw_io(
             head.push(Span::raw(" ".repeat(w - used - top.len())));
             head.push(Span::styled(top, theme::faint()));
         }
-        let mut lines = vec![Line::from(head)];
-        lines.extend(rate_graph(&values, w, half.height as usize - 1, color));
-        f.render_widget(Paragraph::new(lines), half);
+        let [head_area, graph_area] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(half);
+        f.render_widget(Paragraph::new(Line::from(head)), head_area);
+        draw_rate_graph(f, graph_area, &values, color);
     }
 }
 
@@ -379,9 +461,9 @@ fn draw_gpu(f: &mut Frame, app: &App, area: Rect) {
         return;
     };
     let hist: Vec<f32> = app.gpu_hist.iter().copied().collect();
-    let mut lines = vec![Line::from(Span::styled(g.name.clone(), theme::dim()))];
-    lines.extend(graph(&hist, inner.width as usize, inner.height.saturating_sub(1) as usize));
-    f.render_widget(Paragraph::new(lines), inner);
+    let [name, graph_area] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
+    f.render_widget(Paragraph::new(Span::styled(g.name.clone(), theme::dim())), name);
+    draw_graph(f, graph_area, &hist);
 }
 
 /// A horizontal gauge of small squares, gradient-coloured along its length.
@@ -448,7 +530,7 @@ fn draw_cpu(f: &mut Frame, app: &App, area: Rect) {
         Layout::horizontal([Constraint::Min(10), Constraint::Length(2), Constraint::Length(cores_w)]).areas(inner);
 
     let hist: Vec<f32> = app.cpu_hist.iter().copied().collect();
-    f.render_widget(Paragraph::new(graph(&hist, g.width as usize, g.height as usize)), g);
+    draw_graph(f, g, &hist);
 
     let rows: Vec<Line> = (0..INNER)
         .map(|r| {
@@ -578,7 +660,7 @@ fn draw_mem(f: &mut Frame, app: &App, area: Rect) {
         row("swap", sys.swap_used, sys.swap_total, sp),
         Line::from(bar(w, sp)),
     ];
-    lines.extend(graph(&hist, w, 1));
+    lines.extend(sparkline(&hist, w));
     f.render_widget(Paragraph::new(lines), inner);
 }
 

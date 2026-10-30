@@ -647,6 +647,10 @@ impl App {
                 self.show_explain = !self.show_explain;
                 self.explain_scroll = 0;
             }
+            KeyCode::Char('D') => {
+                let name = crate::ui::header::next_graph_style();
+                self.set_status(name);
+            }
             KeyCode::Char('T') => {
                 self.theme = theme::Chooser::open();
                 self.mode = Mode::Theme;
