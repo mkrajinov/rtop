@@ -146,7 +146,7 @@ impl Picker {
             helper_ns: ns.into(),
             home: ns.into(),
             confirm: None,
-            focus: Pane::Pods,
+            focus: Pane::Namespaces,
             ns_sel: usize::from(!ns.is_empty()),
             pod_sel: 0,
             ns_filter: String::new(),
@@ -202,6 +202,7 @@ impl Picker {
     pub fn came_back(&mut self, ns: &str, pod: &str) {
         self.want = Some((ns.to_string(), pod.to_string()));
         self.view = View::Pods;
+        self.focus = Pane::Pods;
         if self.ns.is_empty() || self.ns == ns {
             self.list();
         } else {
@@ -505,6 +506,8 @@ mod tests {
         let mut p = Picker::new("kind-rtop", false, "v1.32.2", "rtop-demo");
         p.set_namespaces(vec!["default".into(), "kube-system".into(), "rtop-demo".into()]);
         p.set_pods(Ok(vec![pod("rtop-demo", "multi", "Running"), pod("rtop-demo", "stuck", "Pending")]));
+        assert_eq!(p.focus, Pane::Namespaces, "the picker starts with the namespace chosen first");
+        press(&mut p, KeyCode::Enter);
         p
     }
 
@@ -529,9 +532,10 @@ mod tests {
     #[test]
     fn coming_back_selects_the_pod_just_left() {
         let mut p = picker();
+        p.focus = Pane::Namespaces;
         p.came_back("rtop-demo", "stuck");
         p.set_pods(Ok(vec![pod("rtop-demo", "multi", "Running"), pod("rtop-demo", "stuck", "Pending")]));
-        assert_eq!(p.selected_pod().unwrap().name, "stuck");
+        assert_eq!((p.selected_pod().unwrap().name.as_str(), p.focus), ("stuck", Pane::Pods));
     }
 
     #[test]

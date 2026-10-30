@@ -33,7 +33,7 @@ The namespace is labelled `pod-security.kubernetes.io/enforce=privileged` for th
 rtop k8s --context kind-rtop -n rtop-demo
 ```
 
-Expect namespaces on the left with `rtop-demo` selected, its four pods on the right with
+Expect namespaces on the left, focused, with `rtop-demo` selected, its four pods on the right with
 READY, STATUS, RESTARTS, AGE and NODE. Tab switches panes, `/` filters the focused pane,
 Enter on `multi` opens the pod view, Esc there returns to the picker with `multi` selected.
 "all namespaces" adds a NAMESPACE column. `2` switches to the Nodes view (`kubectl get
