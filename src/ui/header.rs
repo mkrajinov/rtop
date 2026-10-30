@@ -209,44 +209,94 @@ fn draw_containers(f: &mut Frame, list: &[ContainerUsage], area: Rect) {
 
 const EIGHTHS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-/// A multi-row bar graph of 0–100% samples, newest on the right. Each row is
-/// coloured by the height it represents, so peaks turn amber and red.
+/// A graph of 0–100% samples, newest on the right. Each row is coloured by
+/// the height it represents, so peaks turn amber and red.
 pub fn graph(values: &[f32], width: usize, height: usize) -> Vec<Line<'static>> {
     // A one-row sparkline has no height to grade, so colour by value.
     plot(values, width, height, |top, v| theme::level(if height == 1 { v } else { top }))
 }
 
-/// A graph of rates with no natural maximum, scaled so the highest visible
-/// sample fills the height. Throughput isn't good or bad, so one colour.
+/// Decades below the peak that a rate graph still shows.
+const RATE_DECADES: f32 = 3.0;
+
+/// A graph of rates with no natural maximum. The highest visible sample
+/// fills the height, on a log scale: traffic spans orders of magnitude, and
+/// on a linear one a single burst flattens everything else to nothing. Each
+/// quarter of the height is a factor of about 5.6. Throughput isn't good or
+/// bad, so one colour.
 fn rate_graph(values: &[f32], width: usize, height: usize, color: Color) -> Vec<Line<'static>> {
     let peak = visible(values, width).iter().fold(0f32, |a, &b| a.max(b));
-    let pct: Vec<f32> = values.iter().map(|v| if peak > 0.0 { v / peak * 100.0 } else { 0.0 }).collect();
+    let pct: Vec<f32> = values.iter().map(|&v| log_pct(v, peak)).collect();
     plot(&pct, width, height, |_, _| color)
 }
 
-/// The newest `width` samples.
-fn visible(values: &[f32], width: usize) -> &[f32] {
-    &values[values.len().saturating_sub(width)..]
+/// `v` as 0–100 of a log scale from `peak / 10^RATE_DECADES` to `peak`.
+/// Anything above zero gets at least a sliver, so activity always shows.
+fn log_pct(v: f32, peak: f32) -> f32 {
+    if v <= 0.0 || peak <= 0.0 {
+        return 0.0;
+    }
+    let pct = ((v / peak).log10() / RATE_DECADES + 1.0) * 100.0;
+    pct.clamp(1.0, 100.0)
 }
 
+/// The newest samples that fit `cells` columns: two per column for braille
+/// graphs, one for a single-row sparkline.
+fn visible(values: &[f32], cells: usize) -> &[f32] {
+    &values[values.len().saturating_sub(cells * 2)..]
+}
+
+/// Braille dots of one cell column, bottom to top: left side, then right.
+const DOTS: [[u32; 4]; 2] = [[0x40, 0x04, 0x02, 0x01], [0x80, 0x20, 0x10, 0x08]];
+
 /// Draws 0–100 samples; `color(row_top, value)` picks each cell's colour.
+/// Taller graphs use braille: two samples per cell and four dot rows per
+/// line, filled from the bottom like an area chart. One line has too little
+/// height for four steps, so it uses eighth blocks, one sample per cell.
 fn plot(values: &[f32], width: usize, height: usize, color: impl Fn(f32, f32) -> Color) -> Vec<Line<'static>> {
+    if height == 1 {
+        let shown = &values[values.len().saturating_sub(width)..];
+        let mut spans = vec![Span::raw(" ".repeat(width - shown.len()))];
+        spans.extend(shown.iter().map(|&v| {
+            let eighths = ((v.clamp(0.0, 100.0) / 100.0) * 8.0).round() as usize;
+            if eighths == 0 {
+                Span::styled("▁", theme::faint())
+            } else {
+                Span::styled(EIGHTHS[eighths], Style::default().fg(color(100.0, v)))
+            }
+        }));
+        return vec![Line::from(spans)];
+    }
     let shown = visible(values, width);
-    let pad = width - shown.len();
+    // Pad on the left so the newest sample is always the right half of the
+    // last cell; `None` is no sample yet.
+    let mut cols: Vec<Option<f32>> = vec![None; width * 2 - shown.len()];
+    cols.extend(shown.iter().map(|&v| Some(v)));
+    let levels = (height * 4) as f32;
+    let dots = |v: Option<f32>| v.map_or(0, |v| ((v.clamp(0.0, 100.0) / 100.0) * levels).round() as usize);
+    let band = 100.0 / height as f32;
     (0..height)
         .map(|row| {
-            let band = 100.0 / height as f32;
-            let lo = (height - 1 - row) as f32 * band;
-            let mut spans = vec![Span::raw(" ".repeat(pad))];
-            spans.extend(shown.iter().map(|&v| {
-                let eighths = (((v - lo) / band).clamp(0.0, 1.0) * 8.0).round() as usize;
-                if eighths == 0 && row == height - 1 {
-                    Span::styled("▁", theme::faint())
-                } else {
-                    Span::styled(EIGHTHS[eighths], Style::default().fg(color(lo + band, v)))
+            let from_bottom = height - 1 - row;
+            let lo = from_bottom as f32 * band;
+            let spans = cols.chunks(2).map(|pair| {
+                let mut bits = 0;
+                for (side, v) in pair.iter().enumerate() {
+                    let here = dots(*v).saturating_sub(from_bottom * 4).min(4);
+                    bits |= DOTS[side][..here].iter().sum::<u32>();
                 }
-            }));
-            Line::from(spans)
+                let peak = pair.iter().flatten().fold(0f32, |a, &b| a.max(b));
+                if bits == 0 && row == height - 1 && pair.iter().any(Option::is_some) {
+                    // A quiet stretch still shows its baseline.
+                    Span::styled("⣀", theme::faint())
+                } else if bits == 0 {
+                    Span::raw(" ")
+                } else {
+                    let ch = char::from_u32(0x2800 + bits).unwrap_or(' ');
+                    Span::styled(ch.to_string(), Style::default().fg(color(lo + band, peak)))
+                }
+            });
+            Line::from(spans.collect::<Vec<_>>())
         })
         .collect()
 }
@@ -256,7 +306,7 @@ fn rate(bytes_per_sec: f32) -> String {
 }
 
 /// Two throughput graphs side by side (in | out, read | write), each scaled
-/// to its own peak. The title names where the counters come from.
+/// to its own peak on a log scale. The title names where the counters come from.
 fn draw_io(
     f: &mut Frame,
     area: Rect,
@@ -288,7 +338,8 @@ fn draw_io(
         let style = if now < 1.0 { theme::faint() } else { Style::default().fg(color).add_modifier(Modifier::BOLD) };
         let used = label.chars().count() + 1 + cur.len();
         let mut head = vec![Span::styled(format!("{label} "), theme::dim()), Span::styled(cur, style)];
-        // The peak is the graph's top; show it when the half has room.
+        // The peak is the graph's top (log scale, see `rate_graph`); show
+        // it when the half has room.
         let top = format!("max {}", rate(peak));
         if used + 2 + top.len() <= w {
             head.push(Span::raw(" ".repeat(w - used - top.len())));
@@ -635,4 +686,35 @@ pub fn draw_target(f: &mut Frame, app: &App, area: Rect) {
         spans.extend([sep(), Span::styled(n.clone(), Style::default().fg(p.warn))]);
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+#[cfg(test)]
+mod graph_tests {
+    use super::*;
+
+    fn text(lines: &[Line]) -> Vec<String> {
+        lines.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect()
+    }
+
+    #[test]
+    fn braille_puts_two_samples_in_a_cell_and_four_levels_in_a_line() {
+        // 2 lines = 8 dot rows: 100% fills both, 50% the bottom line,
+        // 25% half of it, 0% nothing; the left cell is the oldest pair.
+        let got = text(&plot(&[100.0, 50.0, 25.0, 0.0], 2, 2, |_, _| Color::Reset));
+        assert_eq!(got, ["⡇ ", "⣿⡄"]);
+    }
+
+    #[test]
+    fn a_quiet_graph_shows_its_baseline_and_no_sample_shows_nothing() {
+        let got = text(&plot(&[0.0, 0.0], 3, 2, |_, _| Color::Reset));
+        assert_eq!(got, ["   ", "  ⣀"]);
+    }
+
+    #[test]
+    fn rates_are_log_scaled_below_the_peak() {
+        assert_eq!(log_pct(1000.0, 1000.0), 100.0);
+        assert!((log_pct(10.0, 1000.0) - 33.3).abs() < 0.1, "two decades down is a third");
+        assert_eq!(log_pct(0.001, 1000.0), 1.0, "tiny but not zero still shows");
+        assert_eq!(log_pct(0.0, 1000.0), 0.0);
+    }
 }
