@@ -9,6 +9,7 @@ pub mod fixture;
 #[cfg(feature = "kube")]
 pub mod kube;
 pub mod linux_parse;
+pub mod space;
 
 #[cfg(target_os = "macos")]
 mod iokit;

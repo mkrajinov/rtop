@@ -743,3 +743,30 @@ pitfalls = [
 ]
 try = ["kubectl debug node/NODE -it --image=busybox:1.37 -- ps"]
 man = ["pid_namespaces(7)", "capabilities(7)"]
+
+# ───────────────────────────── dashboard ─────────────────────────────
+
+[volumes]
+title = "Volumes — space per mounted filesystem"
+what = "A block device (a disk or partition) holds a filesystem; mounting attaches it to a directory. One device can be mounted at many places (bind mounts, Docker's /etc/hosts), and many directories you see are not disks at all (proc, sysfs, tmpfs). statvfs(3) asks a filesystem for its block counts: f_blocks in total, f_bfree free, and f_bavail free for unprivileged users, each in units of f_frsize. rtop computes, as df does: size = f_blocks, used = f_blocks − f_bfree, free = f_bavail, used % = used / (used + free). The disk card shows the fullest volumes first; v lists all of them."
+linux = "/proc/self/mountinfo lists every mount with its device number (major:minor), filesystem type and source. rtop drops pseudo filesystems, reads each device once at its shortest mount point, and calls statvfs on it. Network and FUSE filesystems are listed but not read, because statvfs on a hung NFS server blocks until it answers."
+macos = "getfsstat(2) with MNT_NOWAIT returns a struct statfs per mount from the kernel's cache, without asking each filesystem: f_blocks, f_bfree, f_bavail in units of f_bsize. APFS volumes are grouped per container (see the next lesson)."
+pitfalls = [
+  "df and du disagree. du adds up the files it can see; df asks the filesystem. A deleted file that a process still has open uses space df counts and du can't see (lsof +L1 lists them). Files hidden under a mount point, snapshots and filesystem metadata also count for df only.",
+  "used + free < size. ext4 reserves 5% of blocks for root by default (tune2fs -m); f_bfree includes them, f_bavail doesn't. A disk can be '100% full' for users while root can still write.",
+  "A filesystem can also run out of inodes with free blocks left: df -i.",
+]
+try = ["df -k", "df -i", "findmnt", "cat /proc/self/mountinfo", "lsof +L1", "du -sh /var/* | sort -h"]
+man = ["statvfs(3)", "proc_pid_mountinfo(5)", "getfsstat(2)", "df(1)"]
+
+[apfs_container]
+title = "APFS containers — volumes that share their space"
+what = "On a Mac, one APFS container (a synthesized disk such as disk3) holds several volumes: the sealed, read-only system volume mounted at /, your data at /System/Volumes/Data, plus Preboot, Recovery, VM (swap files) and Update. They don't have fixed sizes; they all take blocks from the container's shared pool. statfs reports the container's total and free blocks for each of them. rtop therefore shows one row per container, named by its browsable mount point, with used = total − free across all its volumes: the number Finder shows."
+macos = "getfsstat(2): f_mntfromname /dev/diskNsM… names the container diskN; f_flags MNT_DONTBROWSE (\"nobrowse\" in mount) marks volumes Finder hides. Containers whose volumes are all nobrowse (Xcode simulator images, xarts, iSCPreboot) are only in the v list."
+linux = "Linux has the same idea in LVM thin pools, btrfs subvolumes and ZFS datasets: several filesystems drawing on one pool, so their free space is shared and adding up per-filesystem free space counts it several times."
+pitfalls = [
+  "df -h / on a Mac shows how much the small system volume uses (often under 15 GB) next to the container's free space, so / looks half empty on a disk that is nearly full. The data is on /System/Volumes/Data.",
+  "Adding up 'Avail' over APFS volumes counts the same free space several times.",
+]
+try = ["diskutil apfs list", "df -h / /System/Volumes/Data", "mount | grep apfs"]
+man = ["getfsstat(2)", "diskutil(8)"]

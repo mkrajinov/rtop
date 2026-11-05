@@ -986,6 +986,124 @@ pub fn parse_net_dev(text: &str) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
+/// One line of /proc/self/mountinfo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mount {
+    /// `major:minor` of the device: the same filesystem bind-mounted twice
+    /// has the same one.
+    pub dev: String,
+    pub mount: String,
+    pub fstype: String,
+    pub source: String,
+}
+
+/// /proc/self/mountinfo: `id parent major:minor root mountpoint options
+/// [optional fields...] - fstype source superoptions`. Spaces in paths are
+/// written as `\040`.
+pub fn parse_mountinfo(text: &str) -> Vec<Mount> {
+    let unescape = |s: &str| {
+        let mut out = String::new();
+        let mut rest = s;
+        while let Some(i) = rest.find('\\') {
+            out.push_str(&rest[..i]);
+            let code = rest.get(i + 1..i + 4).and_then(|o| u8::from_str_radix(o, 8).ok());
+            match code {
+                Some(c) => {
+                    out.push(c as char);
+                    rest = &rest[i + 4..];
+                }
+                None => {
+                    out.push('\\');
+                    rest = &rest[i + 1..];
+                }
+            }
+        }
+        out + rest
+    };
+    text.lines()
+        .filter_map(|l| {
+            let (left, right) = l.split_once(" - ")?;
+            let f: Vec<&str> = left.split(' ').collect();
+            let r: Vec<&str> = right.split(' ').collect();
+            Some(Mount {
+                dev: f.get(2)?.to_string(),
+                mount: unescape(f.get(4)?),
+                fstype: r.first()?.to_string(),
+                source: unescape(r.get(1)?),
+            })
+        })
+        .collect()
+}
+
+/// Kernel interfaces and memory-backed filesystems: no disk space to show.
+pub const PSEUDO_FS: &[&str] = &[
+    "proc",
+    "sysfs",
+    "devtmpfs",
+    "devpts",
+    "tmpfs",
+    "ramfs",
+    "cgroup",
+    "cgroup2",
+    "mqueue",
+    "debugfs",
+    "tracefs",
+    "securityfs",
+    "pstore",
+    "bpf",
+    "configfs",
+    "fusectl",
+    "hugetlbfs",
+    "autofs",
+    "binfmt_misc",
+    "nsfs",
+    "rpc_pipefs",
+    "efivarfs",
+    "selinuxfs",
+    "squashfs",
+    "nfsd",
+    "devfs",
+    "shm",
+];
+
+/// statvfs(3) on these waits for a server: a hung NFS mount would freeze
+/// the UI, so rtop lists them without reading them.
+fn remote_fs(t: &str) -> bool {
+    matches!(t, "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "ceph" | "glusterfs" | "9p" | "afs" | "sshfs")
+        || t.starts_with("fuse.")
+        || t == "fuse"
+}
+
+/// Which mounts to read with statvfs, and the volumes listed without
+/// reading. Pseudo filesystems are dropped; a device mounted at several
+/// places (bind mounts, Docker's /etc/hosts) is read once, at its shortest
+/// mount point.
+pub fn plan_volumes(mounts: Vec<Mount>) -> (Vec<Mount>, Vec<Volume>) {
+    let mut read: Vec<Mount> = Vec::new();
+    let mut skipped = Vec::new();
+    for m in mounts {
+        if PSEUDO_FS.contains(&m.fstype.as_str()) {
+            continue;
+        }
+        if remote_fs(&m.fstype) {
+            skipped.push(Volume {
+                mount: m.mount,
+                device: m.source,
+                fstype: m.fstype,
+                note: Some("not read: a network or FUSE filesystem can block statvfs".into()),
+                ..Default::default()
+            });
+            continue;
+        }
+        match read.iter_mut().find(|r| r.dev == m.dev) {
+            Some(r) if m.mount.len() < r.mount.len() => *r = m,
+            Some(_) => {}
+            None => read.push(m),
+        }
+    }
+    (read, skipped)
+}
+
 /// (device, bytes read, bytes written) from /proc/diskstats. Columns 6 and 10
 /// count 512-byte sectors whatever the disk's real sector size.
 pub fn parse_diskstats(text: &str) -> Vec<(String, u64, u64)> {
@@ -1050,6 +1168,34 @@ pub fn cgroup_oom_kills(text: &str) -> Option<u64> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    fn system_fixture(name: &str) -> String {
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/linux/system").join(name))
+            .unwrap()
+    }
+
+    #[test]
+    fn mountinfo_keeps_disks_once_and_lists_remote_ones_unread() {
+        let mounts = parse_mountinfo(&system_fixture("mountinfo"));
+        assert!(mounts.iter().any(|m| m.mount == "/mnt/my disk"), "\\040 is a space");
+        let (read, skipped) = plan_volumes(mounts);
+        let names: Vec<_> = read.iter().map(|m| (m.mount.as_str(), m.fstype.as_str())).collect();
+        assert_eq!(names, [("/", "overlay"), ("/etc/hosts", "ext4"), ("/mnt/my disk", "xfs")]);
+        let unread: Vec<_> = skipped.iter().map(|v| v.mount.as_str()).collect();
+        assert_eq!(unread, ["/src", "/srv/nfs"]);
+        assert!(skipped.iter().all(|v| !v.shown && v.note.is_some()));
+    }
+
+    #[test]
+    fn space_matches_df() {
+        use crate::collector::space::space;
+        // df -k: 1K-blocks 10255636, Used 3218004, Available 6497160
+        // (blocks 2563909, bfree 1759408, bavail 1624290, frsize 4096).
+        let (size, used, free) = space(2563909, 1759408, 1624290, 4096);
+        assert_eq!((size / 1024, used / 1024, free / 1024), (10255636, 3218004, 6497160));
+        let v = Volume { used, free, ..Default::default() };
+        assert_eq!(v.percent().round(), 33.0, "df's Capacity: used / (used + avail)");
+    }
 
     fn fixture(pid: &str, name: &str) -> Option<String> {
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/linux").join(pid).join(name))

@@ -5,17 +5,17 @@
 
 ## Phase 1: Shared
 
-- [ ] T001 Extend `L` to local mode: `DASH_LESSONS` in `src/app.rs`, help text in `src/ui/mod.rs`
+- [x] T001 Extend `L` to local mode: `DASH_LESSONS` in `src/app.rs`, help text in `src/ui/mod.rs`
 
 ## Phase 2: User Story 1 — volumes (P1)
 
-- [ ] T010 [US1] `Volume`, `Volumes` in `src/model.rs`; `SystemInfo.volumes`
-- [ ] T011 [US1] Pure `space()` and `parse_mountinfo()` + `volumes_from_mounts()` in `src/collector/linux_parse.rs`, tests with `tests/fixtures/linux/mountinfo`
-- [ ] T012 [US1] Linux `statvfs` collection with 5 s cache in `src/collector/linux.rs`
-- [ ] T013 [US1] macOS `getfsstat(MNT_NOWAIT)` with APFS container grouping and 5 s cache in `src/collector/macos.rs`; pure grouping function tested
-- [ ] T014 [US1] Fixture volumes in `src/collector/fixture.rs`
-- [ ] T015 [US1] Disk card split and `v` overlay in `src/ui/header.rs`, `src/ui/mod.rs`, `src/app.rs`; Kubernetes message
-- [ ] T016 [US1] Explain `volumes`, `apfs_container`; README sources and keys; snapshots; ROADMAP tick
+- [x] T010 [US1] `Volume`, `Volumes` in `src/model.rs`; `SystemInfo.volumes`
+- [x] T011 [US1] Pure `space()` and `parse_mountinfo()` + `volumes_from_mounts()` in `src/collector/linux_parse.rs`, tests with `tests/fixtures/linux/mountinfo`
+- [x] T012 [US1] Linux `statvfs` collection with 5 s cache in `src/collector/linux.rs`
+- [x] T013 [US1] macOS `getfsstat(MNT_NOWAIT)` with APFS container grouping and 5 s cache in `src/collector/macos.rs`; pure grouping function tested
+- [x] T014 [US1] Fixture volumes in `src/collector/fixture.rs`
+- [x] T015 [US1] Disk card split and `v` overlay in `src/ui/header.rs`, `src/ui/mod.rs`, `src/app.rs`; Kubernetes message
+- [x] T016 [US1] Explain `volumes`, `apfs_container`; README sources and keys; snapshots; ROADMAP tick
 
 ## Phase 3: User Story 2 — swap activity and pressure (P2)
 

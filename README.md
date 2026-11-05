@@ -46,6 +46,8 @@ See [Kubernetes](#kubernetes) for what each mode adds to the cluster and the per
 | | `p` | pause refreshing |
 | | `c` | show / hide executable paths |
 | | `T` | theme picker (live preview, Enter saves) |
+| | `v` | every mounted volume: size, used, free (the disk card shows the fullest) |
+| | `L` | next lesson in the explain panel (dashboard cards; Kubernetes ones first in `rtop k8s`) |
 | | `D` | graph style: glow (average line, min–max halo; default), braille, ratatui `Chart`, `Chart` with octants |
 | | `?` | help |
 | detail | `← →` / `1-8` | switch tab |
@@ -72,6 +74,7 @@ data source.
 | fans (system card) | AppleSMC keys `FNum`, `F<n>Ac`, `F<n>Mx` | `/sys/class/hwmon/*/fan*_input` |
 | network | `sysctl NET_RT_IFLIST2` (64-bit counters), `en*` interfaces only | `/proc/net/dev`, interfaces with a `/sys/class/net/*/device` |
 | disk | IOKit `IOBlockStorageDriver` → `Statistics` | `/proc/diskstats`, whole disks from `/sys/block` |
+| volumes (disk card, `v`) | `getfsstat(MNT_NOWAIT)` → `statfs`; one row per APFS container, `nobrowse` ones only in `v` | `/proc/self/mountinfo` + `statvfs`; network and FUSE mounts listed, not read |
 | gpu | IOKit `IOAccelerator` → `PerformanceStatistics` | `/sys/class/drm/card*/device/gpu_busy_percent` (amdgpu; NVIDIA needs NVML) |
 
 The kernel only counts bytes, so the card computes the rate as the difference between two samples,

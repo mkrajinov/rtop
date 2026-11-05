@@ -381,3 +381,17 @@ fn pod_mode_containers_card_shows_limits_throttling_and_ooms() {
     press(&mut app, KeyCode::Right);
     assert_ne!(app.explain_key(), "k8s_limits");
 }
+
+#[test]
+fn disk_card_lists_volumes_and_v_lists_them_all() {
+    let mut app = app();
+    let screen = render(&mut app, 150, 40);
+    assert!(screen.contains("/var/li"), "fullest volume first:\n{screen}");
+    insta::assert_snapshot!("dashboard", screen.lines().take(16).collect::<Vec<_>>().join("\n"));
+    press(&mut app, KeyCode::Char('v'));
+    let screen = render(&mut app, 150, 40);
+    assert!(screen.contains("not read: a network or FUSE filesystem"), "{screen}");
+    insta::assert_snapshot!("volumes", screen);
+    press(&mut app, KeyCode::Esc);
+    assert!(!render(&mut app, 150, 40).contains("v or Esc closes"));
+}

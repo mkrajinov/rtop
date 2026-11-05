@@ -15,6 +15,7 @@ pub struct LinuxCollector {
     env: LinuxEnv,
     cmdlines: HashMap<(Pid, u64), Vec<u8>>,
     cpu: CpuInfo,
+    volumes: super::space::Cache,
 }
 
 impl LinuxCollector {
@@ -29,6 +30,7 @@ impl LinuxCollector {
             },
             cmdlines: HashMap::new(),
             cpu: cpu_info(),
+            volumes: super::space::Cache::new(),
         }
     }
 }
@@ -165,6 +167,38 @@ fn disk() -> Option<IoCounters> {
     sum(rows, "/sys/block", whole, "/proc/diskstats")
 }
 
+/// Mounted filesystems from /proc/self/mountinfo, sized with statvfs(3).
+/// Network and FUSE mounts are listed but not read: statvfs on a hung NFS
+/// server blocks until it answers.
+fn volumes() -> Option<Volumes> {
+    let (mounts, mut list) = lp::plan_volumes(lp::parse_mountinfo(&read("/proc/self/mountinfo")?));
+    for m in mounts {
+        let Ok(path) = std::ffi::CString::new(m.mount.as_bytes()) else { continue };
+        let mut st = std::mem::MaybeUninit::<libc::statvfs>::zeroed();
+        if unsafe { libc::statvfs(path.as_ptr(), st.as_mut_ptr()) } != 0 {
+            continue;
+        }
+        // SAFETY: statvfs succeeded and filled the struct.
+        let st = unsafe { st.assume_init() };
+        if st.f_blocks == 0 {
+            continue;
+        }
+        let (size, used, free) =
+            super::space::space(st.f_blocks as u64, st.f_bfree as u64, st.f_bavail as u64, st.f_frsize as u64);
+        list.push(Volume {
+            mount: m.mount,
+            device: m.source,
+            fstype: m.fstype,
+            size,
+            used,
+            free,
+            shown: true,
+            note: None,
+        });
+    }
+    Some(Volumes::new(list, "/proc/self/mountinfo + statvfs f_blocks, f_bfree, f_bavail × f_frsize"))
+}
+
 /// amdgpu (and some other DRM drivers) publish gpu_busy_percent in sysfs.
 /// NVIDIA does not: its numbers are only reachable through NVML.
 fn gpu() -> Option<GpuInfo> {
@@ -219,8 +253,16 @@ impl Collector for LinuxCollector {
             &read("/proc/uptime").unwrap_or_default(),
         );
         let cpu = CpuInfo { mhz: mhz(), ..self.cpu.clone() };
-        let system =
-            SystemInfo { net: net(), disk: disk(), gpu: gpu(), cpu, battery: battery(), thermal: thermal(), ..system };
+        let system = SystemInfo {
+            net: net(),
+            disk: disk(),
+            gpu: gpu(),
+            cpu,
+            battery: battery(),
+            thermal: thermal(),
+            volumes: self.volumes.get(volumes),
+            ..system
+        };
         let mut processes = Vec::new();
         let mut live = std::collections::HashSet::new();
         for pid in pids() {
@@ -357,6 +399,9 @@ mod tests {
         let (net, disk) = (snap.system.net.as_ref().unwrap(), snap.system.disk.as_ref().unwrap());
         assert!(net.read > 0 && disk.read > 0, "{net:?} {disk:?}");
         eprintln!("{net:?}\n{disk:?}\n{:?}", snap.system.gpu);
+        let vols = snap.system.volumes.as_ref().expect("mountinfo");
+        eprintln!("{vols:#?}");
+        assert!(vols.shown().any(|v| v.mount == "/" && v.size > 0), "{vols:?}");
         let d = c.details(ProcId::local(me)).unwrap();
         assert!(d.files.iter().any(|f| f.fd <= 2));
         assert!(!d.regions.is_empty() && !d.threads.is_empty() && !d.limits.is_empty());

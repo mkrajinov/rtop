@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::{panel, theme};
 use crate::app::App;
 use crate::fmt;
-use crate::model::{Battery, ContainerUsage, Fan, IoCounters, ProcState, Target};
+use crate::model::{Battery, ContainerUsage, Fan, IoCounters, ProcState, Target, Volume, Volumes};
 
 /// Rows inside each card.
 const INNER: usize = 5;
@@ -55,6 +55,11 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             draw_battery(f, b, columns().areas::<3>(bottom)[1]);
         }
         draw_io(f, net, "network", sys.net.as_ref(), &app.net_hist, [("↓ in", p.code), ("↑ out", p.zombie)], None);
+        let volumes = sys.volumes.as_ref().ok_or(if app.collector.target().is_some() {
+            "volumes: not read in Kubernetes mode (statvfs is a syscall; rtop reads files)"
+        } else {
+            "no volumes reported"
+        });
         draw_io(
             f,
             disk,
@@ -62,7 +67,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             sys.disk.as_ref(),
             &app.disk_hist,
             [("read", p.code), ("write", p.zombie)],
-            sys.thermal.ssd_c,
+            Some(DiskExtras { temp: sys.thermal.ssd_c, volumes }),
         );
         draw_gpu(f, app, gpu);
     }
@@ -465,6 +470,14 @@ fn rate(bytes_per_sec: f32) -> String {
 
 /// Two throughput graphs side by side (in | out, read | write), each scaled
 /// to its own peak on a log scale. The title names where the counters come from.
+/// What only the disk card shows next to its graphs.
+struct DiskExtras<'a> {
+    /// SSD temperature, in the title.
+    temp: Option<f32>,
+    /// Volumes, or why there are none.
+    volumes: Result<&'a Volumes, &'a str>,
+}
+
 fn draw_io(
     f: &mut Frame,
     area: Rect,
@@ -472,8 +485,9 @@ fn draw_io(
     counters: Option<&IoCounters>,
     hist: &[std::collections::VecDeque<f32>; 2],
     series: [(&str, Color); 2],
-    temp: Option<f32>,
+    disk: Option<DiskExtras<'_>>,
 ) {
+    let (temp, volumes) = disk.map_or((None, None), |d| (d.temp, Some(d.volumes)));
     let source = counters.map_or("no counters on this system", |c| c.source.as_str());
     let mut right = Vec::new();
     if let Some(c) = temp {
@@ -483,10 +497,28 @@ fn draw_io(
     let block = panel(title).title_top(Line::from(right).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // The disk card gives its right half to volumes when it is wide enough;
+    // read and write then stack on the left.
+    let (graphs, stacked) = match volumes {
+        Some(v) if inner.width >= 28 => {
+            // Rates need a dozen columns; mount names and gauges want the rest.
+            let left = (inner.width / 3).max(14);
+            let [left, right] =
+                Layout::horizontal([Constraint::Length(left), Constraint::Fill(1)]).spacing(2).areas(inner);
+            draw_volume_rows(f, right, v);
+            (left, true)
+        }
+        _ => (inner, false),
+    };
     if counters.is_none() || inner.height < 2 {
         return;
     }
-    let halves: [Rect; 2] = Layout::horizontal([Constraint::Fill(1); 2]).spacing(2).areas(inner);
+    let halves: [Rect; 2] = if stacked {
+        let h = graphs.height / 2;
+        Layout::vertical([Constraint::Length(h); 2]).areas(graphs)
+    } else {
+        Layout::horizontal([Constraint::Fill(1); 2]).spacing(2).areas(graphs)
+    };
     for ((half, values), (label, color)) in halves.into_iter().zip(hist).zip(series) {
         let values: Vec<f32> = values.iter().copied().collect();
         let w = half.width as usize;
@@ -507,6 +539,52 @@ fn draw_io(
         f.render_widget(Paragraph::new(Line::from(head)), head_area);
         draw_rate_graph(f, graph_area, &values, color);
     }
+}
+
+/// Fullest volumes first, one per row: mount point, gauge, used %. The last
+/// row says how many more the `v` list has.
+fn draw_volume_rows(f: &mut Frame, area: Rect, volumes: Result<&Volumes, &str>) {
+    let vols = match volumes {
+        Ok(v) => v,
+        Err(why) => {
+            f.render_widget(
+                Paragraph::new(why).style(theme::faint()).wrap(ratatui::widgets::Wrap { trim: true }),
+                area,
+            );
+            return;
+        }
+    };
+    let shown: Vec<&Volume> = vols.shown().collect();
+    let rows = area.height as usize;
+    let more = vols.list.len().saturating_sub(rows);
+    let fit = if more > 0 { rows.saturating_sub(1) } else { rows };
+    let w = area.width as usize;
+    let name_w = shown.iter().take(fit).map(|v| v.mount.chars().count()).max().unwrap_or(1).clamp(1, w / 2);
+    let mut lines: Vec<Line> = shown
+        .iter()
+        .take(fit)
+        .map(|v| {
+            let name: String = if v.mount.chars().count() > name_w {
+                format!("{}…", v.mount.chars().take(name_w - 1).collect::<String>())
+            } else {
+                format!("{:<name_w$}", v.mount)
+            };
+            let pct = v.percent();
+            let mut spans = vec![Span::styled(name, theme::dim()), Span::raw(" ")];
+            spans.extend(bar(w.saturating_sub(name_w + 6), pct));
+            spans.push(pct_span(pct, 5));
+            Line::from(spans)
+        })
+        .collect();
+    let hidden = vols.list.len() - lines.len();
+    if hidden > 0 {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{hidden} more · "), theme::faint()),
+            Span::styled("v", Style::default().fg(theme::pal().accent).add_modifier(Modifier::BOLD)),
+            Span::styled(" list", theme::faint()),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_gpu(f: &mut Frame, app: &App, area: Rect) {

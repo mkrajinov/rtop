@@ -36,7 +36,7 @@ Size: **S** is an evening, **M** a few days, **L** a week or more.
 
 | | Feature | Teaches | Linux source | macOS source | Size |
 |---|---|---|---|---|---|
-| [ ] | Disk space per volume (used/free bars) | mounts vs block devices; why `df` and `du` disagree | `/proc/self/mountinfo` + `statvfs` | `getfsstat` | S |
+| [x] | Disk space per volume (used/free bars) | mounts vs block devices; why `df` and `du` disagree | `/proc/self/mountinfo` + `statvfs` | `getfsstat` | S |
 | [ ] | Network totals since boot, IP addresses, link speed | interface counters, addresses vs links | `/proc/net/dev`, `getifaddrs`, `/sys/class/net/*/speed` | `getifaddrs`, `NET_RT_IFLIST2` | S |
 | [ ] | Swap and memory pressure in the memory card | reclaim, compressed memory, swap-in vs swap-out | `/proc/vmstat` (`pswpin`, `pswpout`), `/proc/pressure/memory` | `vm.memory_pressure`, `vm_stat` compressor pages | S |
 | [ ] | Load average graph next to run-queue length | load ≠ CPU%; D-state tasks count toward load on Linux | `/proc/loadavg` (`running/total`) | `vm.loadavg` | S |

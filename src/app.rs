@@ -122,6 +122,10 @@ impl Column {
 
 /// What the explain panel teaches about Kubernetes, in the order `L`
 /// shows them (User Story 4).
+/// What the dashboard cards teach, in the order `L` shows them after any
+/// Kubernetes lessons.
+pub const DASH_LESSONS: &[&str] = &["volumes", "apfs_container"];
+
 pub const KUBE_LESSONS: &[&str] = &[
     "container_meminfo",
     "k8s_limits",
@@ -263,6 +267,8 @@ pub enum Mode {
     Signal,
     Help,
     Theme,
+    /// Every mounted volume (`v`).
+    Volumes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -634,7 +640,7 @@ impl App {
         match self.mode {
             Mode::Filter => self.key_filter(key),
             Mode::Signal => self.key_signal(key),
-            Mode::Help => self.mode = self.base_mode(),
+            Mode::Help | Mode::Volumes => self.mode = self.base_mode(),
             Mode::Theme => self.key_theme(key),
             Mode::Detail => self.key_detail(key),
             Mode::Table => self.key_table(key),
@@ -668,6 +674,7 @@ impl App {
                 let lab = self.lab.as_mut().unwrap();
                 lab.revealed = !lab.revealed;
             }
+            KeyCode::Char('v') => self.mode = Mode::Volumes,
             _ => return false,
         }
         true
@@ -714,9 +721,9 @@ impl App {
             KeyCode::End => self.select(usize::MAX),
             KeyCode::Left => self.move_focus(-1),
             KeyCode::Right => self.move_focus(1),
-            KeyCode::Char('L') if self.collector.target().is_some() => {
+            KeyCode::Char('L') => {
                 let next = self.lesson.map_or(0, |i| i + 1);
-                self.lesson = (next < KUBE_LESSONS.len()).then_some(next);
+                self.lesson = (next < self.lessons().len()).then_some(next);
                 self.show_explain = self.lesson.is_some();
                 self.explain_scroll = 0;
             }
@@ -958,7 +965,13 @@ impl App {
     pub fn explain_key(&self) -> &'static str {
         match (&self.mode, &self.detail) {
             (_, Some(d)) => d.rows().get(d.selected).map_or("pid", |r| r.key(d.tab)),
-            _ => self.lesson.map_or(self.focus.key(), |i| KUBE_LESSONS[i]),
+            _ => self.lesson.map_or(self.focus.key(), |i| self.lessons()[i]),
         }
+    }
+
+    /// `L`'s lessons here: Kubernetes ones first in Kubernetes mode.
+    fn lessons(&self) -> Vec<&'static str> {
+        let kube = if self.collector.target().is_some() { KUBE_LESSONS } else { &[] };
+        kube.iter().chain(DASH_LESSONS).copied().collect()
     }
 }

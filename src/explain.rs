@@ -66,7 +66,12 @@ mod tests {
                 }
             }
         }
-        for key in crate::ui::EXPLAIN_KEYS.iter().chain(crate::app::KUBE_LESSONS).chain(&["pod", "container"]) {
+        for key in crate::ui::EXPLAIN_KEYS
+            .iter()
+            .chain(crate::app::KUBE_LESSONS)
+            .chain(crate::app::DASH_LESSONS)
+            .chain(&["pod", "container"])
+        {
             if cat.get(key).is_none() {
                 missing.push(format!("{key} (ui)"));
             }

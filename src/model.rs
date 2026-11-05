@@ -193,6 +193,55 @@ pub struct SystemInfo {
     pub cpu: CpuInfo,
     pub battery: Option<Battery>,
     pub thermal: Thermal,
+    /// Mounted filesystems and their space; `None` where rtop can't read
+    /// them (Kubernetes mode: `statvfs` is a syscall, not a file).
+    pub volumes: Option<Volumes>,
+}
+
+/// Space on one filesystem, as `df` computes it from `statvfs(3)`/`statfs(2)`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Volume {
+    pub mount: String,
+    pub device: String,
+    pub fstype: String,
+    pub size: u64,
+    /// Blocks in use: `(f_blocks - f_bfree) * frsize`.
+    pub used: u64,
+    /// What an unprivileged user may still write: `f_bavail * frsize`. The
+    /// gap between `size - used` and this is the root reserve.
+    pub free: u64,
+    /// Drawn on the dashboard; the rest only appear in the `v` list.
+    pub shown: bool,
+    /// Why a volume is hidden or was not read.
+    pub note: Option<String>,
+}
+
+impl Volume {
+    /// Used share of what is usable, as `df`'s Capacity column.
+    pub fn percent(&self) -> f32 {
+        let usable = self.used + self.free;
+        if usable == 0 { 0.0 } else { self.used as f32 / usable as f32 * 100.0 }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Volumes {
+    /// Shown volumes first, fullest first; then the hidden ones.
+    pub list: Vec<Volume>,
+    pub source: String,
+}
+
+impl Volumes {
+    pub fn new(mut list: Vec<Volume>, source: impl Into<String>) -> Self {
+        list.sort_by(|a, b| {
+            b.shown.cmp(&a.shown).then(b.percent().total_cmp(&a.percent())).then(a.mount.cmp(&b.mount))
+        });
+        Volumes { list, source: source.into() }
+    }
+
+    pub fn shown(&self) -> impl Iterator<Item = &Volume> {
+        self.list.iter().filter(|v| v.shown)
+    }
 }
 
 /// Temperatures in °C (the hottest sensor of each kind) and fans.

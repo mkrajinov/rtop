@@ -76,6 +76,7 @@ pub struct MacCollector {
     page_size: u64,
     cmdlines: HashMap<(Pid, u64), String>,
     cpu: CpuInfo,
+    volumes: super::space::Cache,
 }
 
 impl MacCollector {
@@ -90,6 +91,7 @@ impl MacCollector {
             argmax: argmax as usize,
             page_size: unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64,
             cmdlines: HashMap::new(),
+            volumes: super::space::Cache::new(),
             cpu: CpuInfo {
                 model: sysctl_string("machdep.cpu.brand_string").unwrap_or_default(),
                 kinds: super::iokit::core_kinds(),
@@ -129,6 +131,7 @@ impl MacCollector {
             cpu: self.cpu.clone(),
             battery: super::iokit::battery(),
             thermal: super::iokit::thermal(),
+            volumes: None,
         }
     }
 
@@ -186,7 +189,8 @@ impl Collector for MacCollector {
         }
         let live: std::collections::HashSet<_> = processes.iter().map(|p| (p.pid, p.start_time)).collect();
         self.cmdlines.retain(|k, _| live.contains(k));
-        Snapshot { system: self.system(), processes, clock: None, containers: Vec::new() }
+        let system = SystemInfo { volumes: self.volumes.get(volumes), ..self.system() };
+        Snapshot { system, processes, clock: None, containers: Vec::new() }
     }
 
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
@@ -913,6 +917,45 @@ fn net_counters() -> Option<IoCounters> {
     Some(c)
 }
 
+/// Mounted filesystems from getfsstat(2). MNT_NOWAIT returns what the
+/// kernel has cached instead of asking each filesystem, so a hung network
+/// mount can't block the UI.
+fn volumes() -> Option<Volumes> {
+    // Not in the libc crate: <sys/mount.h> MNT_DONTBROWSE, "nobrowse".
+    const MNT_DONTBROWSE: u32 = 0x0010_0000;
+    let n = unsafe { libc::getfsstat(null_mut(), 0, libc::MNT_NOWAIT) };
+    if n <= 0 {
+        return None;
+    }
+    // Room for mounts that appear between the two calls.
+    let cap = n as usize + 8;
+    let mut buf: Vec<libc::statfs> = Vec::with_capacity(cap);
+    let got =
+        unsafe { libc::getfsstat(buf.as_mut_ptr(), (cap * size_of::<libc::statfs>()) as c_int, libc::MNT_NOWAIT) };
+    if got <= 0 {
+        return None;
+    }
+    // SAFETY: getfsstat filled `got` entries.
+    unsafe { buf.set_len(got as usize) };
+    let entries = buf
+        .iter()
+        .map(|f| super::space::FsEntry {
+            mount: cstr(&f.f_mntonname),
+            device: cstr(&f.f_mntfromname),
+            fstype: cstr(&f.f_fstypename),
+            blocks: f.f_blocks,
+            bfree: f.f_bfree,
+            bavail: f.f_bavail,
+            bsize: f.f_bsize as u64,
+            browse: f.f_flags & MNT_DONTBROWSE == 0,
+        })
+        .collect();
+    Some(Volumes::new(
+        super::space::group(entries),
+        "getfsstat(MNT_NOWAIT) → statfs f_blocks, f_bfree, f_bavail × f_bsize",
+    ))
+}
+
 fn list_fds(pid: Pid) -> Option<Vec<libc::proc_fdinfo>> {
     let need = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, null_mut(), 0) };
     if need <= 0 {
@@ -1220,6 +1263,14 @@ fn rd_u64(b: &[u8], o: usize) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_volume_is_its_apfs_container() {
+        let v = volumes().expect("getfsstat");
+        let root = v.list.iter().find(|v| v.mount == "/").expect("/ is listed");
+        assert!(root.shown && root.size > 0 && root.used > 0, "{root:?}");
+        eprintln!("{:#?}", v.list.iter().map(|v| (&v.mount, v.shown, v.percent(), &v.note)).collect::<Vec<_>>());
+    }
 
     #[test]
     fn procargs_layout() {

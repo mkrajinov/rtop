@@ -11,11 +11,11 @@ expression: screen
  │                                               ⢀                       │ │                                 ▃ │ │ fans   2400 rpm                  │
  ╰───────────────────────────────────────────────────────────────────────╯ ╰───────────────────────────────────╯ ╰──────────────────────────────────╯
  ╭ network ──────────────────────────────────────── eth0 · /proc/net/dev ╮ ╭ disk ────── vda · /proc/diskstats ╮ ╭ gpu ─────────────────────────────╮
- │ ↓ in 0B/s                 max 0B/s  ↑ out 0B/s               max 0B/s │ │ read 0B/s         write 0B/s      │ │ No GPU counters.                 │
- │                                                                       │ │                                   │ │                                  │
- │                                                                       │ │                                   │ │                                  │
- │                                                                       │ │                                   │ │                                  │
- │                                  ⢀                                  ⢀ │ │                ⢀                ⢀ │ │                                  │
+ │ ↓ in 0B/s                 max 0B/s  ↑ out 0B/s               max 0B/s │ │ read 0B/s       /var/li… ■■■  90% │ │ No GPU counters.                 │
+ │                                                                       │ │              ⢀  /        ■■■  74% │ │                                  │
+ │                                                                       │ │ write 0B/s      /boot    ■■■  21% │ │                                  │
+ │                                                                       │ │              ⢀  1 more · v list   │ │                                  │
+ │                                  ⢀                                  ⢀ │ │                                   │ │                                  │
  ╰───────────────────────────────────────────────────────────────────────╯ ╰───────────────────────────────────╯ ╰──────────────────────────────────╯
  ╭ processes 4 ──────────────────────────────────────────────────────────────────────────╮╭ explain · rss  [ ] scroll ──────────────────────────────╮
  │     PID  S     NI        CPU%▼        MEM%     RSS  COMMAND                           ││ RSS — resident set size                                 │
@@ -41,4 +41,4 @@ expression: screen
  │                                                                                       ││ would I free by killing this?', look at USS. For a fair │
  │                                                                                       ││ share, look at PSS.                                     │
  ╰───────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────╯
-  ↑↓  select    ←→  column    s  sort    e  explain    Enter  inspect    /  filter    t  tree    c  paths    f  family    k  signal    +-  nice    T
+  ↑↓  select    ←→  column    s  sort    e  explain    L  lessons    Enter  inspect    /  filter    t  tree    c  paths    f  family    k  signal

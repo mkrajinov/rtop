@@ -86,6 +86,48 @@ impl Default for FixtureCollector {
                         fans: vec![Fan { rpm: 2400.0, max: 6000.0 }],
                         ..Default::default()
                     },
+                    volumes: Some(Volumes::new(
+                        vec![
+                            Volume {
+                                mount: "/".into(),
+                                device: "/dev/vda1".into(),
+                                fstype: "ext4".into(),
+                                size: 64 << 30,
+                                used: 45 << 30,
+                                free: 16 << 30,
+                                shown: true,
+                                note: None,
+                            },
+                            Volume {
+                                mount: "/var/lib/docker".into(),
+                                device: "/dev/vdb".into(),
+                                fstype: "xfs".into(),
+                                size: 256 << 30,
+                                used: 230 << 30,
+                                free: 26 << 30,
+                                shown: true,
+                                note: None,
+                            },
+                            Volume {
+                                mount: "/boot".into(),
+                                device: "/dev/vda2".into(),
+                                fstype: "ext4".into(),
+                                size: 1 << 30,
+                                used: 200 << 20,
+                                free: 760 << 20,
+                                shown: true,
+                                note: None,
+                            },
+                            Volume {
+                                mount: "/srv/nfs".into(),
+                                device: "fs1:/export".into(),
+                                fstype: "nfs4".into(),
+                                note: Some("not read: a network or FUSE filesystem can block statvfs".into()),
+                                ..Default::default()
+                            },
+                        ],
+                        "/proc/self/mountinfo + statvfs",
+                    )),
                 },
                 processes: vec![init, shell, hog, zombie],
                 clock: None,

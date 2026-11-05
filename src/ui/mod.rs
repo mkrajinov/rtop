@@ -65,6 +65,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     match app.mode {
         Mode::Signal => draw_signals(f, app, full),
         Mode::Help => draw_help(f, app, full),
+        Mode::Volumes => draw_volumes(f, app, full),
         Mode::Theme => draw_theme(f, &app.theme, full),
         _ => {}
     }
@@ -143,6 +144,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("←→", "column"),
                 ("s", "sort"),
                 ("e", "explain"),
+                ("L", "lessons"),
                 ("Enter", "inspect"),
                 ("/", "filter"),
                 ("t", "tree"),
@@ -215,8 +217,61 @@ fn draw_signals(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, r, &mut state);
 }
 
+/// `v`: every volume, including the ones the disk card leaves out.
+fn draw_volumes(f: &mut Frame, app: &App, area: Rect) {
+    let vols = app.snapshot.system.volumes.as_ref();
+    let rows = vols.map_or(0, |v| v.list.len() + v.list.iter().filter(|v| v.note.is_some()).count());
+    let r = centered(area, 110, rows as u16 + 6);
+    f.render_widget(Clear, r);
+    let block = panel("volumes · v or Esc closes");
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    let Some(vols) = vols else {
+        let why = if app.collector.target().is_some() {
+            "Not read in Kubernetes mode: free space comes from statvfs(3), a system call, and rtop's reader only reads files."
+        } else {
+            "No volumes reported."
+        };
+        f.render_widget(Paragraph::new(why).style(theme::dim()).wrap(Wrap { trim: true }), inner);
+        return;
+    };
+    let w = (inner.width as usize).saturating_sub(62).max(12);
+    let mut lines = vec![Line::from(Span::styled(
+        format!(
+            "{:<w$} {:<8} {:<16} {:>8} {:>8} {:>8} {:>5}",
+            "MOUNT", "TYPE", "DEVICE", "SIZE", "USED", "FREE", "USE%"
+        ),
+        theme::title(),
+    ))];
+    let cut = |s: &str, n: usize| {
+        if s.chars().count() <= n { s.to_string() } else { format!("{}…", s.chars().take(n - 1).collect::<String>()) }
+    };
+    for v in &vols.list {
+        let style = if v.shown { theme::text() } else { theme::dim() };
+        let num = |n: u64| if v.size == 0 { "-".to_string() } else { crate::fmt::bytes(n) };
+        let pct = if v.size == 0 { "-".to_string() } else { format!("{:.0}%", v.percent()) };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<w$} {:<8} {:<16} ", cut(&v.mount, w), cut(&v.fstype, 8), cut(&v.device, 16)),
+                style,
+            ),
+            Span::styled(format!("{:>8} {:>8} {:>8} ", num(v.size), num(v.used), num(v.free)), style),
+            Span::styled(format!("{pct:>5}"), Style::default().fg(theme::level(v.percent()))),
+        ]));
+        if let Some(n) = &v.note {
+            lines.push(Line::from(Span::styled(format!("  {n}"), theme::faint())));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("source: {} · used % = used / (used + free), as df", vols.source),
+        theme::faint(),
+    )));
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    let r = centered(area, 78, 37);
+    let r = centered(area, 78, 39);
     f.render_widget(Clear, r);
     let h = |k: &str, d: &str| {
         Line::from(vec![
@@ -243,7 +298,8 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         h("+  -", "renice (lowering nice needs privileges)"),
         h("p", "pause refreshing"),
         h("Esc", "clear filter / scope; leave detail view; back to the pod list (rtop k8s)"),
-        h("L", "rtop k8s: next Kubernetes lesson in the explain panel (limits, throttling, OOM…)"),
+        h("L", "next lesson in the explain panel: dashboard cards (and Kubernetes in rtop k8s)"),
+        h("v", "every mounted volume, with size, used and free"),
         h("q  Ctrl-C", "quit"),
         Line::raw(""),
         s("Detail view"),
