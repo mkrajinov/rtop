@@ -958,7 +958,7 @@ fn draw_sys(f: &mut Frame, app: &App, area: Rect) {
     let label = |t: &str| Span::styled(format!("{t:<7}"), theme::dim());
     let dot = |n: usize, what: &str, c| {
         let style = if n == 0 { theme::faint() } else { Style::default().fg(c) };
-        Span::styled(format!("● {n} {what}  "), style)
+        Span::styled(format!("● {n} {what} "), style)
     };
 
     let w = inner.width as usize;
@@ -980,7 +980,7 @@ fn draw_sys(f: &mut Frame, app: &App, area: Rect) {
     let tail = vec![
         Line::from(vec![
             label("tasks"),
-            Span::styled(format!("{}  ", procs.len()), theme::bold()),
+            Span::styled(format!("{} ", procs.len()), theme::bold()),
             dot(zombies, "zombie", theme::pal().zombie),
             dot(dstate, "in D", theme::pal().bad),
         ]),

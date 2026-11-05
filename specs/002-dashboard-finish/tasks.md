@@ -39,5 +39,5 @@
 
 ## Phase 6: Polish
 
-- [ ] T050 `make linux-test` in Docker; check PSI presence there
-- [ ] T051 Idle CPU check (SC-003) and a screenshot of the dashboard
+- [x] T050 `make linux-test` in Docker; check PSI presence there
+- [x] T051 Idle CPU check (SC-003) and a screenshot of the dashboard
