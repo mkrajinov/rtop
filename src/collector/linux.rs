@@ -168,7 +168,7 @@ fn disk() -> Option<IoCounters> {
 }
 
 /// The default route's interface, its address and negotiated speed.
-fn link() -> Option<NetLink> {
+fn net_link() -> Option<NetLink> {
     let name = lp::default_route_iface(&read("/proc/net/route")?)?;
     let ipv4 = super::ipv4_addrs().into_iter().find(|(n, _)| *n == name).map(|(_, a)| a.to_string());
     // -1 (or EINVAL) when the link is down or the driver doesn't say.
@@ -276,7 +276,7 @@ impl Collector for LinuxCollector {
             swap_io: read("/proc/vmstat")
                 .and_then(|t| lp::vmstat_swap(&t, self.env.page_size, "/proc/vmstat pswpin, pswpout")),
             pressure: read("/proc/pressure/memory").and_then(|t| lp::psi(&t)),
-            link: link(),
+            link: net_link(),
             ..system
         };
         let mut processes = Vec::new();
