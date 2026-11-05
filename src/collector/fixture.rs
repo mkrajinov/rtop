@@ -130,6 +130,7 @@ impl Default for FixtureCollector {
                     )),
                     swap_io: Some(IoCounters { read: 4 << 12, write: 9 << 12, source: "/proc/vmstat".into() }),
                     pressure: Some(Pressure::Psi { some10: 3.4, full10: 0.8 }),
+                    run_queue: Some((2, 312)),
                 },
                 processes: vec![init, shell, hog, zombie],
                 clock: None,

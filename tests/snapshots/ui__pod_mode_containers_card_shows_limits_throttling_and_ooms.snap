@@ -4,10 +4,10 @@ expression: screen
 ---
  ⎈ kind-rtop · rtop-demo/web · node rtop-control-plane
  ╭ containers ────────────────────────────────────── cgroup: cpu.stat cpu.max memory.* ╮ ╭ memory · node ───── pressure 3% · 16.0G ╮ ╭ system ────── up 1d 02:03 · 1.5s ╮
- │ app      cpu 0.50 / 0.5     thr  97% mem 200M / 256M      oom 1  ↻ 3 last OOMKilled │ │ used                  6.0G / 16.0G  38% │ │ load   1.25   0.75   0.50        │
- │ sidecar  cpu 0.01 · no limit         mem 12.0M · no limit  oom 0  ↻ 0               │ │ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │ │        1m     5m     15m         │
- │ logger   limits cpu 0.1 mem 64.0M  ↻ 0  container is waiting: CrashLoopBackOff      │ │ swap ↓0 ↑0/s             0B / 2.0G   0% │ │ tasks  4  ● 1 running            │
- │                                                                                     │ │ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │ │        ● 1 zombie  ● 0 in D      │
+ │ app      cpu 0.50 / 0.5     thr  97% mem 200M / 256M      oom 1  ↻ 3 last OOMKilled │ │ used                  6.0G / 16.0G  38% │ │ load 1.25 0.75 0.50   runq 2/312 │
+ │ sidecar  cpu 0.01 · no limit         mem 12.0M · no limit  oom 0  ↻ 0               │ │ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │ │                                  │
+ │ logger   limits cpu 0.1 mem 64.0M  ↻ 0  container is waiting: CrashLoopBackOff      │ │ swap ↓0 ↑0/s             0B / 2.0G   0% │ │                                ⠐ │
+ │                                                                                     │ │ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │ │ tasks  4  ● 1 zombie  ● 0 in D   │
  │ limits are the cgroup's; the memory and cpu cards show the whole node               │ │                                       ▃ │ │ fans   2400 rpm                  │
  ╰─────────────────────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────╯ ╰──────────────────────────────────╯
  ╭ processes 4 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮

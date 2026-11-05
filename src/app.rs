@@ -124,7 +124,7 @@ impl Column {
 /// shows them (User Story 4).
 /// What the dashboard cards teach, in the order `L` shows them after any
 /// Kubernetes lessons.
-pub const DASH_LESSONS: &[&str] = &["volumes", "apfs_container", "swap_activity", "mem_pressure"];
+pub const DASH_LESSONS: &[&str] = &["volumes", "apfs_container", "swap_activity", "mem_pressure", "run_queue"];
 
 pub const KUBE_LESSONS: &[&str] = &[
     "container_meminfo",
@@ -306,6 +306,8 @@ pub struct App {
     pub core_usage: Vec<f32>,
     /// Average CPU% and memory% over time, newest last, for the header graphs.
     pub cpu_hist: VecDeque<f32>,
+    /// 1-minute load as a percentage of the core count.
+    pub load_hist: VecDeque<f32>,
     pub mem_hist: VecDeque<f32>,
     net_rate: RateTracker,
     disk_rate: RateTracker,
@@ -365,6 +367,7 @@ impl App {
             cores: CoreTracker::default(),
             core_usage: Vec::new(),
             cpu_hist: VecDeque::new(),
+            load_hist: VecDeque::new(),
             mem_hist: VecDeque::new(),
             net_rate: RateTracker::default(),
             disk_rate: RateTracker::default(),
@@ -445,6 +448,7 @@ impl App {
         let [disk_rd, disk_wr] = &mut self.disk_hist;
         for (hist, v) in [
             (&mut self.cpu_hist, avg),
+            (&mut self.load_hist, (sys.load[0] / sys.cores.len().max(1) as f64 * 100.0).min(100.0) as f32),
             (&mut self.mem_hist, mem),
             (net_rx, rx),
             (net_tx, tx),

@@ -166,6 +166,7 @@ pub fn system(stat: &str, meminfo: &str, loadavg: &str, uptime: &str) -> SystemI
     }
     if let Ok(l) = procfs_core::LoadAverage::from_read(loadavg.as_bytes()) {
         s.load = [l.one as f64, l.five as f64, l.fifteen as f64];
+        s.run_queue = Some((l.cur, l.max));
     }
     if let Ok(u) = procfs_core::Uptime::from_read(uptime.as_bytes()) {
         s.uptime_secs = u.uptime as u64;
@@ -1191,6 +1192,13 @@ mod tests {
     fn system_fixture(name: &str) -> String {
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/linux/system").join(name))
             .unwrap()
+    }
+
+    #[test]
+    fn run_queue_is_field_four_of_loadavg() {
+        let s = system("", "", "9.76 6.24 4.43 4/2565 36658\n", "");
+        assert_eq!(s.run_queue, Some((4, 2565)));
+        assert_eq!(s.load[0], 9.76f32 as f64);
     }
 
     #[test]

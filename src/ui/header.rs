@@ -882,31 +882,54 @@ fn draw_sys(f: &mut Frame, app: &App, area: Rect) {
     // Load is a run-queue length: compare it with the number of cores.
     let load = |l: f64| {
         Span::styled(
-            format!("{l:<7.2}"),
+            format!("{l:.2}"),
             Style::default().fg(theme::level((l / cores * 100.0) as f32)).add_modifier(Modifier::BOLD),
         )
     };
     let procs = &app.snapshot.processes;
     let count = |s: ProcState| procs.iter().filter(|p| p.state == s).count();
-    let (running, zombies, dstate) = (count(ProcState::Running), count(ProcState::Zombie), count(ProcState::DiskSleep));
+    let (zombies, dstate) = (count(ProcState::Zombie), count(ProcState::DiskSleep));
+    // Runnable / total: the kernel's own count on Linux (threads included),
+    // counted from process states where it has none (macOS).
+    let (runnable, total) = sys.run_queue.unwrap_or((count(ProcState::Running) as u32, procs.len() as u32));
     let label = |t: &str| Span::styled(format!("{t:<7}"), theme::dim());
     let dot = |n: usize, what: &str, c| {
         let style = if n == 0 { theme::faint() } else { Style::default().fg(c) };
         Span::styled(format!("● {n} {what}  "), style)
     };
 
-    let lines = vec![
-        Line::from(vec![label("load"), load(sys.load[0]), load(sys.load[1]), load(sys.load[2])]),
-        Line::from(vec![label(""), Span::styled(format!("{:<7}{:<7}{:<7}", "1m", "5m", "15m"), theme::faint())]),
+    let w = inner.width as usize;
+    let mut head = vec![Span::styled("load ", theme::dim())];
+    for (i, l) in sys.load.iter().enumerate() {
+        if i > 0 {
+            head.push(Span::raw(" "));
+        }
+        head.push(load(*l));
+    }
+    let rq = format!("{runnable}/{total}");
+    let used: usize = head.iter().map(|s| s.width()).sum();
+    let rq_label = if used + 6 + rq.len() < w { "runq " } else { "" };
+    head.push(Span::raw(" ".repeat(w.saturating_sub(used + rq_label.len() + rq.len()).max(1))));
+    head.push(Span::styled(rq_label, theme::dim()));
+    let busy = runnable as f64 > cores;
+    head.push(Span::styled(rq, if busy { Style::default().fg(theme::pal().warn) } else { theme::text() }));
+
+    let tail = vec![
         Line::from(vec![
             label("tasks"),
             Span::styled(format!("{}  ", procs.len()), theme::bold()),
-            dot(running, "running", theme::pal().good),
+            dot(zombies, "zombie", theme::pal().zombie),
+            dot(dstate, "in D", theme::pal().bad),
         ]),
-        Line::from(vec![label(""), dot(zombies, "zombie", theme::pal().zombie), dot(dstate, "in D", theme::pal().bad)]),
         fans(&sys.thermal.fans),
     ];
-    f.render_widget(Paragraph::new(lines), inner);
+    let [top, graph, bottom] =
+        Layout::vertical([Constraint::Length(1), Constraint::Fill(1), Constraint::Length(2)]).areas(inner);
+    f.render_widget(Paragraph::new(Line::from(head)), top);
+    // 1-minute load over time; the top is the core count.
+    let hist: Vec<f32> = app.load_hist.iter().copied().collect();
+    draw_graph(f, graph, &hist);
+    f.render_widget(Paragraph::new(tail), bottom);
 }
 
 /// The line above the cards in Kubernetes mode: which cluster, pod and node

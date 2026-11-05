@@ -76,6 +76,7 @@ data source.
 | disk | IOKit `IOBlockStorageDriver` → `Statistics` | `/proc/diskstats`, whole disks from `/sys/block` |
 | volumes (disk card, `v`) | `getfsstat(MNT_NOWAIT)` → `statfs`; one row per APFS container, `nobrowse` ones only in `v` | `/proc/self/mountinfo` + `statvfs`; network and FUSE mounts listed, not read |
 | swap ↓ in ↑ out, memory pressure (memory card) | `host_statistics64` `swapins`/`swapouts`; `kern.memorystatus_vm_pressure_level` | `/proc/vmstat` `pswpin`/`pswpout`; `/proc/pressure/memory` `some avg10` |
+| load graph, `runq` (system card) | `getloadavg`; run queue counted from process states (macOS has no counter) | `/proc/loadavg` (averages, then runnable/total) |
 | gpu | IOKit `IOAccelerator` → `PerformanceStatistics` | `/sys/class/drm/card*/device/gpu_busy_percent` (amdgpu; NVIDIA needs NVML) |
 
 The kernel only counts bytes, so the card computes the rate as the difference between two samples,

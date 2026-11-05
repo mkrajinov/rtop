@@ -140,6 +140,7 @@ impl MacCollector {
             volumes: None,
             swap_io,
             pressure: sysctl_name::<c_int>("kern.memorystatus_vm_pressure_level").map(|l| Pressure::Level(l as u32)),
+            run_queue: None,
         }
     }
 

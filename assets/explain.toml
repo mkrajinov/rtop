@@ -795,3 +795,16 @@ pitfalls = [
 ]
 try = ["cat /proc/pressure/memory", "cat /sys/fs/cgroup/memory.pressure", "sysctl kern.memorystatus_vm_pressure_level kern.memorystatus_level", "memory_pressure"]
 man = ["proc_pressure(5)", "memory_pressure(1)"]
+
+[run_queue]
+title = "Load average, run queue and the load graph"
+what = "The load average is not CPU usage. It is an exponentially damped average of how many tasks wanted to run, over about 1, 5 and 15 minutes, sampled every 5 seconds. Compare it with the number of cores: load 4 on 8 cores leaves half the CPUs idle; load 16 on 8 cores means tasks wait their turn. runq R/T is the instant behind it: R tasks runnable right now (running or waiting for a CPU) out of T. The graph under it plots the 1-minute load over time with the core count as its top, so a full graph means more work than CPUs."
+linux = "/proc/loadavg: `9.76 6.24 4.43 4/2565 36658`: the three averages, then runnable/total scheduling entities (threads count, so T is larger than the process count), then the last PID used. Linux also counts tasks in uninterruptible sleep (D state, usually waiting for disk or NFS) in the load average, so load can be high with idle CPUs. The R count includes the process reading the file."
+macos = "sysctl vm.loadavg (getloadavg(3)) gives the three averages, counting runnable threads only. macOS has no run-queue count to read, so rtop counts processes in state R from its own process list: derived, and per process rather than per thread."
+pitfalls = [
+  "High load with low CPU% on Linux means tasks stuck in D state: look at the 'in D' count and their wchan, not at CPU hogs.",
+  "The 1-minute average reacts in about a minute; a short burst barely moves it. The graph shows the trend, the CPU card shows now.",
+  "Load is per machine, not per container: in a pod, /proc/loadavg shows the node.",
+]
+try = ["cat /proc/loadavg", "uptime", "sysctl vm.loadavg", "vmstat 1   # column r is the run queue", "ps -eo stat | grep -c '^D'"]
+man = ["proc_loadavg(5)", "getloadavg(3)", "uptime(1)"]

@@ -199,6 +199,9 @@ pub struct SystemInfo {
     /// Bytes swapped in (`read`) and out (`write`) since boot: pages × page size.
     pub swap_io: Option<IoCounters>,
     pub pressure: Option<Pressure>,
+    /// (runnable, total) scheduling entities from /proc/loadavg; `None`
+    /// where the kernel doesn't say (macOS: the UI counts process states).
+    pub run_queue: Option<(u32, u32)>,
 }
 
 /// How short of memory the kernel says it is right now.

@@ -26,9 +26,9 @@
 
 ## Phase 4: User Story 3 — run queue and load graph (P3)
 
-- [ ] T030 [US3] `run_queue` from `/proc/loadavg` in `linux_parse::system`; test
-- [ ] T031 [US3] `load_hist` in app; system card rows; macOS derived run queue
-- [ ] T032 [US3] Explain `run_queue`, `load_graph`; README; snapshots; ROADMAP tick
+- [x] T030 [US3] `run_queue` from `/proc/loadavg` in `linux_parse::system`; test
+- [x] T031 [US3] `load_hist` in app; system card rows; macOS derived run queue
+- [x] T032 [US3] Explain `run_queue`, `load_graph`; README; snapshots; ROADMAP tick
 
 ## Phase 5: User Story 4 — network totals, address, speed (P4)
 
