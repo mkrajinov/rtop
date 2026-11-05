@@ -790,6 +790,9 @@ impl Collector for KubeCollector {
         let text = |n: &str| r.text(n).unwrap_or_default();
         let mut system =
             lp::system(&text("/proc/stat"), &text("/proc/meminfo"), &text("/proc/loadavg"), &text("/proc/uptime"));
+        let page_size = self.sessions.iter().find_map(|s| s.env.map(|e| e.page_size)).unwrap_or(4096);
+        system.swap_io = lp::vmstat_swap(&text("/proc/vmstat"), page_size, "node /proc/vmstat pswpin, pswpout");
+        system.pressure = lp::psi(&text("/proc/pressure/memory"));
         // A network namespace also lists idle tunnel devices (ip_vti0,
         // sit0, ...); only interfaces that moved bytes count. On a node the
         // reader reads /proc/1/net/dev: the host's namespace, not the

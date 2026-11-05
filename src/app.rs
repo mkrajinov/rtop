@@ -124,7 +124,7 @@ impl Column {
 /// shows them (User Story 4).
 /// What the dashboard cards teach, in the order `L` shows them after any
 /// Kubernetes lessons.
-pub const DASH_LESSONS: &[&str] = &["volumes", "apfs_container"];
+pub const DASH_LESSONS: &[&str] = &["volumes", "apfs_container", "swap_activity", "mem_pressure"];
 
 pub const KUBE_LESSONS: &[&str] = &[
     "container_meminfo",
@@ -309,6 +309,9 @@ pub struct App {
     pub mem_hist: VecDeque<f32>,
     net_rate: RateTracker,
     disk_rate: RateTracker,
+    swap_rate: RateTracker,
+    /// Bytes/second swapped in and out, from two samples of the counters.
+    pub swap_bps: [f32; 2],
     /// Bytes/second over time: [received, sent] and [read, written].
     pub net_hist: [VecDeque<f32>; 2],
     pub disk_hist: [VecDeque<f32>; 2],
@@ -365,6 +368,8 @@ impl App {
             mem_hist: VecDeque::new(),
             net_rate: RateTracker::default(),
             disk_rate: RateTracker::default(),
+            swap_rate: RateTracker::default(),
+            swap_bps: [0.0; 2],
             net_hist: Default::default(),
             disk_hist: Default::default(),
             gpu_hist: VecDeque::new(),
@@ -434,6 +439,7 @@ impl App {
         let mem = sys.mem_used as f32 / sys.mem_total.max(1) as f32 * 100.0;
         let [rx, tx] = sys.net.as_ref().map_or([0.0; 2], |c| self.net_rate.update(c, now));
         let [rd, wr] = sys.disk.as_ref().map_or([0.0; 2], |c| self.disk_rate.update(c, now));
+        self.swap_bps = sys.swap_io.as_ref().map_or([0.0; 2], |c| self.swap_rate.update(c, now));
         let gpu = sys.gpu.as_ref().map_or(0.0, |g| g.busy);
         let [net_rx, net_tx] = &mut self.net_hist;
         let [disk_rd, disk_wr] = &mut self.disk_hist;

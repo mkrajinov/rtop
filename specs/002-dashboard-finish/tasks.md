@@ -19,10 +19,10 @@
 
 ## Phase 3: User Story 2 — swap activity and pressure (P2)
 
-- [ ] T020 [US2] `SwapIo`, `Pressure` in model; parsers `vmstat_swap()`, `psi()` + fixtures
-- [ ] T021 [US2] Linux and macOS collection; `reader.sh` reads `/proc/vmstat`, `/proc/pressure/memory`; kube collector parses them
-- [ ] T022 [US2] Swap rate in `src/app.rs`; memory card title chip and swap row
-- [ ] T023 [US2] Explain `swap_activity`, `mem_pressure`; README; snapshots; ROADMAP tick
+- [x] T020 [US2] `SwapIo`, `Pressure` in model; parsers `vmstat_swap()`, `psi()` + fixtures
+- [x] T021 [US2] Linux and macOS collection; `reader.sh` reads `/proc/vmstat`, `/proc/pressure/memory`; kube collector parses them
+- [x] T022 [US2] Swap rate in `src/app.rs`; memory card title chip and swap row
+- [x] T023 [US2] Explain `swap_activity`, `mem_pressure`; README; snapshots; ROADMAP tick
 
 ## Phase 4: User Story 3 — run queue and load graph (P3)
 

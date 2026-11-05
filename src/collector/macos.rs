@@ -108,7 +108,8 @@ impl MacCollector {
         let mut load = [0f64; 3];
         unsafe { libc::getloadavg(load.as_mut_ptr(), 3) };
         let mem_total = sysctl_name::<u64>("hw.memsize").unwrap_or(0);
-        let mem_used = vm_stats()
+        let vm = vm_stats();
+        let mem_used = vm
             .map(|v| {
                 // Activity Monitor's "Memory Used": app memory + wired + compressed.
                 let app = v.internal_page_count.saturating_sub(v.purgeable_count) as u64;
@@ -116,6 +117,11 @@ impl MacCollector {
             })
             .unwrap_or(0);
         let swap = sysctl_name::<libc::xsw_usage>("vm.swapusage");
+        let swap_io = vm.map(|v| IoCounters {
+            read: v.swapins * self.page_size,
+            write: v.swapouts * self.page_size,
+            source: "host_statistics64(HOST_VM_INFO64) swapins, swapouts".into(),
+        });
         let boot = sysctl_name::<libc::timeval>("kern.boottime").map_or(0, |t| t.tv_sec as u64);
         SystemInfo {
             load,
@@ -132,6 +138,8 @@ impl MacCollector {
             battery: super::iokit::battery(),
             thermal: super::iokit::thermal(),
             volumes: None,
+            swap_io,
+            pressure: sysctl_name::<c_int>("kern.memorystatus_vm_pressure_level").map(|l| Pressure::Level(l as u32)),
         }
     }
 

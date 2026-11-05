@@ -986,6 +986,25 @@ pub fn parse_net_dev(text: &str) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
+/// Pages swapped in and out since boot (`pswpin`, `pswpout` in
+/// /proc/vmstat), as bytes.
+pub fn vmstat_swap(text: &str, page_size: u64, source: &str) -> Option<IoCounters> {
+    let kv = key_values(text, ' ');
+    let get = |k: &str| kv.get(k)?.trim().parse::<u64>().ok();
+    Some(IoCounters { read: get("pswpin")? * page_size, write: get("pswpout")? * page_size, source: source.into() })
+}
+
+/// /proc/pressure/memory: `some avg10=1.21 avg60=… total=…` and a `full`
+/// line. Missing when the kernel was built without PSI or booted with
+/// `psi=0`.
+pub fn psi(text: &str) -> Option<Pressure> {
+    let avg10 = |kind: &str| {
+        let line = text.lines().find(|l| l.starts_with(kind))?;
+        line.split_whitespace().find_map(|f| f.strip_prefix("avg10="))?.parse::<f32>().ok()
+    };
+    Some(Pressure::Psi { some10: avg10("some ")?, full10: avg10("full ").unwrap_or(0.0) })
+}
+
 /// One line of /proc/self/mountinfo.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mount {
@@ -1172,6 +1191,15 @@ mod tests {
     fn system_fixture(name: &str) -> String {
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/linux/system").join(name))
             .unwrap()
+    }
+
+    #[test]
+    fn swap_and_pressure() {
+        let vm = system_fixture("vmstat");
+        let io = vmstat_swap(&vm, 4096, "/proc/vmstat").unwrap();
+        assert_eq!((io.read, io.write), (4 * 4096, 9 * 4096));
+        assert_eq!(psi(&system_fixture("pressure_memory")), Some(Pressure::Psi { some10: 1.21, full10: 0.5 }));
+        assert_eq!(psi(""), None, "no PSI in this kernel");
     }
 
     #[test]

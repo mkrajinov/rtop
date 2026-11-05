@@ -128,6 +128,8 @@ impl Default for FixtureCollector {
                         ],
                         "/proc/self/mountinfo + statvfs",
                     )),
+                    swap_io: Some(IoCounters { read: 4 << 12, write: 9 << 12, source: "/proc/vmstat".into() }),
+                    pressure: Some(Pressure::Psi { some10: 3.4, full10: 0.8 }),
                 },
                 processes: vec![init, shell, hog, zombie],
                 clock: None,

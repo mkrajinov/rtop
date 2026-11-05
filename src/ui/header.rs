@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::{panel, theme};
 use crate::app::App;
 use crate::fmt;
-use crate::model::{Battery, ContainerUsage, Fan, IoCounters, ProcState, Target, Volume, Volumes};
+use crate::model::{Battery, ContainerUsage, Fan, IoCounters, Pressure, ProcState, Target, Volume, Volumes};
 
 /// Rows inside each card.
 const INNER: usize = 5;
@@ -791,31 +791,62 @@ fn draw_mem(f: &mut Frame, app: &App, area: Rect) {
     let pct = |a: u64, b: u64| if b == 0 { 0.0 } else { a as f32 / b as f32 * 100.0 };
     let (mp, sp) = (pct(sys.mem_used, sys.mem_total), pct(sys.swap_used, sys.swap_total));
     let title = if app.snapshot.containers.is_empty() { "memory" } else { "memory · node" };
-    let block = panel(title)
-        .title_top(Line::from(Span::styled(format!(" {} ", fmt::bytes(sys.mem_total)), theme::dim())).right_aligned());
+    let mut right = Vec::new();
+    if let Some(chip) = pressure_span(sys.pressure.as_ref()) {
+        right.extend([Span::raw(" "), chip, Span::styled(" ·", theme::faint())]);
+    }
+    right.push(Span::styled(format!(" {} ", fmt::bytes(sys.mem_total)), theme::dim()));
+    let block = panel(title).title_top(Line::from(right).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);
     let w = inner.width as usize;
 
-    let row = |label: &str, used: u64, total: u64, p: f32| {
+    let row = |label: &str, extra: Option<Span<'static>>, used: u64, total: u64, p: f32| {
         let nums = format!("{} / {}", fmt::bytes(used), fmt::bytes(total));
-        let gap = w.saturating_sub(label.len() + nums.len() + 5);
-        Line::from(vec![
-            Span::styled(label.to_string(), theme::dim()),
-            Span::raw(" ".repeat(gap.max(1))),
+        let mut spans = vec![Span::styled(label.to_string(), theme::dim())];
+        let mut taken = label.chars().count() + nums.len() + 5;
+        // Swap activity, when the row has room for it.
+        if let Some(x) = extra.filter(|x| taken + 1 + x.width() < w) {
+            taken += 1 + x.width();
+            spans.extend([Span::raw(" "), x]);
+        }
+        spans.extend([
+            Span::raw(" ".repeat(w.saturating_sub(taken).max(1))),
             Span::styled(nums, theme::text()),
             pct_span(p, 5),
-        ])
+        ]);
+        Line::from(spans)
     };
+    let swap_io = sys.swap_io.as_ref().map(|_| {
+        let short = |b: f32| if b < 1.0 { "0".to_string() } else { fmt::bytes(b as u64) };
+        let [i, o] = app.swap_bps;
+        let style = if i + o < 1.0 { theme::faint() } else { Style::default().fg(theme::pal().warn) };
+        Span::styled(format!("↓{} ↑{}/s", short(i), short(o)), style)
+    });
     let hist: Vec<f32> = app.mem_hist.iter().copied().collect();
     let mut lines = vec![
-        row("used", sys.mem_used, sys.mem_total, mp),
+        row("used", None, sys.mem_used, sys.mem_total, mp),
         Line::from(bar(w, mp)),
-        row("swap", sys.swap_used, sys.swap_total, sp),
+        row("swap", swap_io, sys.swap_used, sys.swap_total, sp),
         Line::from(bar(w, sp)),
     ];
     lines.extend(sparkline(&hist, w));
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Memory pressure for the memory card's title: macOS's level in words,
+/// Linux's PSI `some avg10` as a percentage of time stalled.
+fn pressure_span(p: Option<&Pressure>) -> Option<Span<'static>> {
+    let pal = theme::pal();
+    let (text, color) = match p? {
+        Pressure::Level(1) => ("pressure normal".to_string(), pal.good),
+        Pressure::Level(2) => ("pressure warn".to_string(), pal.warn),
+        Pressure::Level(4) => ("pressure critical".to_string(), pal.bad),
+        Pressure::Level(n) => (format!("pressure level {n}"), pal.warn),
+        // 10% of the time stalled is already a struggling machine.
+        Pressure::Psi { some10, .. } => (format!("pressure {some10:.0}%"), theme::level((some10 * 5.0).min(100.0))),
+    };
+    Some(Span::styled(text, Style::default().fg(color)))
 }
 
 /// Fan speeds, coloured by how close each is to its maximum.

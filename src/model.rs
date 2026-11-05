@@ -196,6 +196,19 @@ pub struct SystemInfo {
     /// Mounted filesystems and their space; `None` where rtop can't read
     /// them (Kubernetes mode: `statvfs` is a syscall, not a file).
     pub volumes: Option<Volumes>,
+    /// Bytes swapped in (`read`) and out (`write`) since boot: pages × page size.
+    pub swap_io: Option<IoCounters>,
+    pub pressure: Option<Pressure>,
+}
+
+/// How short of memory the kernel says it is right now.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Pressure {
+    /// macOS `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warn, 4 critical.
+    Level(u32),
+    /// Linux PSI: share of the last 10 s in which some (or all) runnable
+    /// tasks were stalled waiting for memory.
+    Psi { some10: f32, full10: f32 },
 }
 
 /// Space on one filesystem, as `df` computes it from `statvfs(3)`/`statfs(2)`.

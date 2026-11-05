@@ -261,6 +261,9 @@ impl Collector for LinuxCollector {
             battery: battery(),
             thermal: thermal(),
             volumes: self.volumes.get(volumes),
+            swap_io: read("/proc/vmstat")
+                .and_then(|t| lp::vmstat_swap(&t, self.env.page_size, "/proc/vmstat pswpin, pswpout")),
+            pressure: read("/proc/pressure/memory").and_then(|t| lp::psi(&t)),
             ..system
         };
         let mut processes = Vec::new();

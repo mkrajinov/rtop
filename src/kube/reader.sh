@@ -66,7 +66,7 @@ rtop_reader() {
 	_snap() {
 		# The loop below reuses the positional parameters.
 		seq=$1 cgroot=${2:-}
-		for x in stat meminfo loadavg uptime; do
+		for x in stat meminfo loadavg uptime vmstat pressure/memory; do
 			_file /proc/$x
 		done
 		_file "${RTOP_NET:-/proc/net}/dev" /proc/net/dev

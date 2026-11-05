@@ -770,3 +770,28 @@ pitfalls = [
 ]
 try = ["diskutil apfs list", "df -h / /System/Volumes/Data", "mount | grep apfs"]
 man = ["getfsstat(2)", "diskutil(8)"]
+
+[swap_activity]
+title = "Swap activity — pages moved to and from swap per second"
+what = "The swap row's ↓ is pages read back from swap (swap-in), ↑ pages written out (swap-out), per second over the last refresh, as bytes. Swap *used* says how much was moved out at some time in the past; it can sit high for days on a healthy machine, because nothing reads cold pages back until someone touches them. Swap *activity* says whether the kernel is short of memory right now: steady swap-in means programs are waiting for the disk to give their memory back."
+linux = "pswpin and pswpout in /proc/vmstat count pages since boot; rtop multiplies by the page size and takes the difference between two samples. vmstat 1 shows the same as si/so (in KiB/s)."
+macos = "vm_statistics64.swapins and swapouts from host_statistics64(HOST_VM_INFO64), pages since boot. macOS first compresses memory (the compressor), and only writes compressed pages to /System/Volumes/VM/swapfile* when that is not enough, so swap-out on a Mac means compression already ran out."
+pitfalls = [
+  "High swap used with zero activity is fine: those pages are cold. Low swap used with constant swap-in/out (thrashing) is not.",
+  "Linux also reclaims memory without swap by dropping page cache and writing back dirty file pages; that shows in pgpgout and in PSI, not here.",
+]
+try = ["vmstat 1", "grep -E 'pswp' /proc/vmstat", "vm_stat 1", "sysctl vm.swapusage"]
+man = ["vmstat(8)", "proc_vmstat(5)", "vm_stat(1)"]
+
+[mem_pressure]
+title = "Memory pressure — is the kernel struggling for memory now?"
+what = "The memory card's title says how hard the kernel is working to find free memory. Linux reports pressure stall information (PSI): the share of the last 10 seconds in which at least one runnable task was stalled waiting for memory (reclaim, swap-in, refaults). macOS reports a level that the kernel's memorystatus subsystem sets and apps are notified of: normal, warn or critical. Pressure, not 'used', is the number to alert on: a full page cache is free memory waiting to be used."
+linux = "/proc/pressure/memory: `some avg10=…` (some tasks stalled) and `full avg10=…` (all non-idle tasks stalled at once, the CPU doing nothing useful). Needs CONFIG_PSI and no psi=0 on the kernel command line; each cgroup v2 group has its own memory.pressure, which is what Kubernetes' kubelet and systemd-oomd watch."
+macos = "sysctl kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4 critical, the same level Activity Monitor's Memory Pressure graph colours green, yellow and red. kern.memorystatus_level is the percentage of memory available."
+pitfalls = [
+  "'Memory used 95%' is not pressure: Linux and macOS both keep file data cached until the memory is needed.",
+  "PSI some of a few percent under load is normal; tens of percent means tasks spend that share of time waiting for memory instead of running.",
+  "In a container, /proc/pressure shows the whole node; the container's own pressure is in its cgroup's memory.pressure.",
+]
+try = ["cat /proc/pressure/memory", "cat /sys/fs/cgroup/memory.pressure", "sysctl kern.memorystatus_vm_pressure_level kern.memorystatus_level", "memory_pressure"]
+man = ["proc_pressure(5)", "memory_pressure(1)"]
