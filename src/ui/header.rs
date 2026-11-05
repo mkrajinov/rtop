@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::{panel, theme};
 use crate::app::App;
 use crate::fmt;
-use crate::model::{Battery, ContainerUsage, Fan, IoCounters, Pressure, ProcState, Target, Volume, Volumes};
+use crate::model::{Battery, ContainerUsage, Fan, IoCounters, NetLink, Pressure, ProcState, Target, Volume, Volumes};
 
 /// Rows inside each card.
 const INNER: usize = 5;
@@ -54,7 +54,15 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             [net, disk] = Layout::horizontal([Constraint::Fill(1); 2]).spacing(1).areas(net);
             draw_battery(f, b, columns().areas::<3>(bottom)[1]);
         }
-        draw_io(f, net, "network", sys.net.as_ref(), &app.net_hist, [("↓ in", p.code), ("↑ out", p.zombie)], None);
+        draw_io(
+            f,
+            net,
+            "network",
+            sys.net.as_ref(),
+            &app.net_hist,
+            [("↓ in", p.code), ("↑ out", p.zombie)],
+            Extras::Net(sys.link.as_ref()),
+        );
         let volumes = sys.volumes.as_ref().ok_or(if app.collector.target().is_some() {
             "volumes: not read in Kubernetes mode (statvfs is a syscall; rtop reads files)"
         } else {
@@ -67,7 +75,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             sys.disk.as_ref(),
             &app.disk_hist,
             [("read", p.code), ("write", p.zombie)],
-            Some(DiskExtras { temp: sys.thermal.ssd_c, volumes }),
+            Extras::Disk(DiskExtras { temp: sys.thermal.ssd_c, volumes }),
         );
         draw_gpu(f, app, gpu);
     }
@@ -86,7 +94,15 @@ fn draw_pod(f: &mut Frame, app: &App, top: Rect, bottom: Rect, two_rows: bool) {
         let p = theme::pal();
         let [net, cpu] = Layout::horizontal([Constraint::Fill(2), Constraint::Fill(1)]).spacing(1).areas(bottom);
         let s = &app.snapshot.system;
-        draw_io(f, net, "network", s.net.as_ref(), &app.net_hist, [("↓ in", p.code), ("↑ out", p.zombie)], None);
+        draw_io(
+            f,
+            net,
+            "network",
+            s.net.as_ref(),
+            &app.net_hist,
+            [("↓ in", p.code), ("↑ out", p.zombie)],
+            Extras::Net(None),
+        );
         draw_cpu(f, app, cpu);
     }
 }
@@ -470,6 +486,13 @@ fn rate(bytes_per_sec: f32) -> String {
 
 /// Two throughput graphs side by side (in | out, read | write), each scaled
 /// to its own peak on a log scale. The title names where the counters come from.
+/// What only one of the two throughput cards shows.
+enum Extras<'a> {
+    /// The network card: the main interface, and totals in the head lines.
+    Net(Option<&'a NetLink>),
+    Disk(DiskExtras<'a>),
+}
+
 /// What only the disk card shows next to its graphs.
 struct DiskExtras<'a> {
     /// SSD temperature, in the title.
@@ -485,15 +508,37 @@ fn draw_io(
     counters: Option<&IoCounters>,
     hist: &[std::collections::VecDeque<f32>; 2],
     series: [(&str, Color); 2],
-    disk: Option<DiskExtras<'_>>,
+    extras: Extras<'_>,
 ) {
-    let (temp, volumes) = disk.map_or((None, None), |d| (d.temp, Some(d.volumes)));
+    let (temp, volumes, link, totals) = match extras {
+        Extras::Net(link) => (None, None, link, true),
+        Extras::Disk(d) => (d.temp, Some(d.volumes), None, false),
+    };
     let source = counters.map_or("no counters on this system", |c| c.source.as_str());
     let mut right = Vec::new();
     if let Some(c) = temp {
         right.extend([Span::raw(" "), temp_span(c), Span::styled(" ·", theme::faint())]);
     }
-    right.push(Span::styled(format!(" {source} "), theme::faint()));
+    let mut link_width = 0;
+    if let Some(l) = link {
+        let mut text = l.name.clone();
+        if let Some(a) = &l.ipv4 {
+            text += &format!(" {a}");
+        }
+        if let Some(m) = l.speed_mbps {
+            text += &format!(" · {}", speed(m));
+        }
+        link_width = text.chars().count() + 2;
+        right.extend([Span::raw(" "), Span::styled(text, theme::dim()), Span::raw(" ")]);
+    }
+    // The counters' source too, when the title has room for both.
+    let title_room = (area.width as usize).saturating_sub(title.len() + 8);
+    if link_width == 0 || link_width + 3 + source.chars().count() <= title_room {
+        if link_width > 0 {
+            right.push(Span::styled("·", theme::faint()));
+        }
+        right.push(Span::styled(format!(" {source} "), theme::faint()));
+    }
     let block = panel(title).title_top(Line::from(right).right_aligned());
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -519,15 +564,23 @@ fn draw_io(
     } else {
         Layout::horizontal([Constraint::Fill(1); 2]).spacing(2).areas(graphs)
     };
-    for ((half, values), (label, color)) in halves.into_iter().zip(hist).zip(series) {
+    for (i, ((half, values), (label, color))) in halves.into_iter().zip(hist).zip(series).enumerate() {
         let values: Vec<f32> = values.iter().copied().collect();
         let w = half.width as usize;
         let now = values.last().copied().unwrap_or(0.0);
         let peak = visible(&values, w).iter().fold(0f32, |a, &b| a.max(b));
         let cur = rate(now);
         let style = if now < 1.0 { theme::faint() } else { Style::default().fg(color).add_modifier(Modifier::BOLD) };
-        let used = label.chars().count() + 1 + cur.len();
+        let mut used = label.chars().count() + 1 + cur.len();
         let mut head = vec![Span::styled(format!("{label} "), theme::dim()), Span::styled(cur, style)];
+        // Bytes since the counters started (boot, or the interface coming up).
+        if let (true, Some(c)) = (totals, counters) {
+            let total = format!(" · {}", fmt::bytes([c.read, c.write][i]));
+            if used + total.len() < w {
+                used += total.chars().count();
+                head.push(Span::styled(total, theme::faint()));
+            }
+        }
         // The peak is the graph's top (log scale, see `rate_graph`); show
         // it when the half has room.
         let top = format!("max {}", rate(peak));
@@ -538,6 +591,16 @@ fn draw_io(
         let [head_area, graph_area] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(half);
         f.render_widget(Paragraph::new(Line::from(head)), head_area);
         draw_rate_graph(f, graph_area, &values, color);
+    }
+}
+
+/// Link speed the way drivers advertise it: `100 Mb/s`, `2.5 Gb/s`.
+fn speed(mbps: u64) -> String {
+    if mbps >= 1000 {
+        let g = mbps as f64 / 1000.0;
+        if g.fract() == 0.0 { format!("{g:.0} Gb/s") } else { format!("{g:.1} Gb/s") }
+    } else {
+        format!("{mbps} Mb/s")
     }
 }
 

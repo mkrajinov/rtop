@@ -114,8 +114,8 @@ reset when an interface comes up).
 1. **Given** Wi-Fi or Ethernet as the default route's interface, **Then** the title shows it,
    its IPv4 address and speed when the platform reports one.
 2. **Given** no reported speed (Wi-Fi on Linux, veth, `-1`), **Then** speed is left out.
-3. **Given** Kubernetes mode, **Then** totals show, and the title says the address is not read
-   there.
+3. **Given** Kubernetes mode, **Then** totals show; the address and speed are left out (the
+   `net_link` lesson says why).
 
 ### Edge Cases
 
@@ -175,7 +175,7 @@ reset when an interface comes up).
 | totals | `NET_RT_IFLIST2` (64-bit) | `/proc/net/dev` | `/proc/net/dev` (pod) or `/proc/1/net/dev` (node) |
 | address | `getifaddrs` | `getifaddrs` | not shown |
 | link speed | `if_data64.ifi_baudrate` | `/sys/class/net/IF/speed` | not shown |
-| main interface | route to the default gateway (`NET_RT_DUMP`) or first up, non-loopback with IPv4 | first `00000000` destination in `/proc/net/route` | — |
+| main interface | first active `en*` with IPv4 (`getifaddrs`); under a VPN the default route is a `utun` | first `00000000` destination in `/proc/net/route` | — |
 
 ## Success Criteria *(mandatory)*
 

@@ -202,6 +202,20 @@ pub struct SystemInfo {
     /// (runnable, total) scheduling entities from /proc/loadavg; `None`
     /// where the kernel doesn't say (macOS: the UI counts process states).
     pub run_queue: Option<(u32, u32)>,
+    /// The interface traffic leaves by; `None` in Kubernetes mode.
+    pub link: Option<NetLink>,
+}
+
+/// The main network interface: the default route's on Linux, the first
+/// active `en*` with an IPv4 address on macOS.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NetLink {
+    pub name: String,
+    pub ipv4: Option<String>,
+    /// What the driver negotiated; `None` when it doesn't say (Wi-Fi on
+    /// Linux, virtual interfaces).
+    pub speed_mbps: Option<u64>,
+    pub source: String,
 }
 
 /// How short of memory the kernel says it is right now.

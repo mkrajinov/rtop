@@ -117,6 +117,7 @@ impl MacCollector {
             })
             .unwrap_or(0);
         let swap = sysctl_name::<libc::xsw_usage>("vm.swapusage");
+        let ifaces = iflist2();
         let swap_io = vm.map(|v| IoCounters {
             read: v.swapins * self.page_size,
             write: v.swapouts * self.page_size,
@@ -131,7 +132,8 @@ impl MacCollector {
             swap_used: swap.map_or(0, |s| s.xsu_used),
             uptime_secs: fmt::now_unix().saturating_sub(boot),
             cores: core_ticks(),
-            net: net_counters(),
+            net: ifaces.as_deref().map(net_counters),
+            link: ifaces.as_deref().and_then(link),
             disk: super::iokit::disk(),
             gpu: super::iokit::gpu(),
             cpu: self.cpu.clone(),
@@ -880,7 +882,48 @@ fn core_ticks() -> Vec<CpuTicks> {
 /// bridges and VM interfaces are skipped: their traffic also crosses an `en*`
 /// interface, so adding them would count it twice. NET_RT_IFLIST2 gives the
 /// 64-bit counters; getifaddrs' `if_data` is 32-bit and wraps at 4 GiB.
-fn net_counters() -> Option<IoCounters> {
+fn net_counters(ifaces: &[Iface]) -> IoCounters {
+    let physical: Vec<_> = ifaces.iter().filter(|i| i.name.starts_with("en")).collect();
+    let used = if physical.is_empty() { ifaces.iter().collect() } else { physical };
+    let mut c = IoCounters::default();
+    let mut names = Vec::new();
+    for i in used {
+        // Interfaces that never moved a byte (spare Thunderbolt ports) are noise.
+        if i.rx + i.tx > 0 {
+            c.read += i.rx;
+            c.write += i.tx;
+            names.push(i.name.as_str());
+        }
+    }
+    c.source = format!("{} · NET_RT_IFLIST2", names.join(" "));
+    c
+}
+
+/// The interface traffic most likely leaves by: the first active `en*`
+/// with an IPv4 address (Wi-Fi or Ethernet). Reading the routing table
+/// would be exact; on a Mac this agrees with it except under a VPN.
+fn link(ifaces: &[Iface]) -> Option<NetLink> {
+    let addrs = super::ipv4_addrs();
+    let (name, addr) = addrs.iter().find(|(n, a)| n.starts_with("en") && !a.is_link_local())?;
+    let speed = ifaces.iter().find(|i| i.name == *name).map_or(0, |i| i.baud);
+    Some(NetLink {
+        name: name.clone(),
+        ipv4: Some(addr.to_string()),
+        speed_mbps: (speed > 0).then_some(speed / 1_000_000),
+        source: "getifaddrs, NET_RT_IFLIST2 ifi_baudrate".into(),
+    })
+}
+
+/// One non-loopback interface from NET_RT_IFLIST2.
+struct Iface {
+    name: String,
+    rx: u64,
+    tx: u64,
+    /// Link speed in bits/s as the driver reports it.
+    baud: u64,
+}
+
+fn iflist2() -> Option<Vec<Iface>> {
     let mut mib = [libc::CTL_NET, libc::PF_ROUTE, 0, 0, libc::NET_RT_IFLIST2, 0];
     let mut len = 0;
     if unsafe { libc::sysctl(mib.as_mut_ptr(), 6, null_mut(), &mut len, null_mut(), 0) } != 0 {
@@ -905,25 +948,12 @@ fn net_counters() -> Option<IoCounters> {
                 && !unsafe { libc::if_indextoname(m.ifm_index as u32, name.as_mut_ptr()) }.is_null()
             {
                 let d = m.ifm_data;
-                ifaces.push((cstr(&name), d.ifi_ibytes, d.ifi_obytes));
+                ifaces.push(Iface { name: cstr(&name), rx: d.ifi_ibytes, tx: d.ifi_obytes, baud: d.ifi_baudrate });
             }
         }
         off += msglen;
     }
-    let physical: Vec<_> = ifaces.iter().filter(|(n, ..)| n.starts_with("en")).collect();
-    let used = if physical.is_empty() { ifaces.iter().collect() } else { physical };
-    let mut c = IoCounters::default();
-    let mut names = Vec::new();
-    for (n, rx, tx) in used {
-        // Interfaces that never moved a byte (spare Thunderbolt ports) are noise.
-        if rx + tx > 0 {
-            c.read += rx;
-            c.write += tx;
-            names.push(n.as_str());
-        }
-    }
-    c.source = format!("{} · NET_RT_IFLIST2", names.join(" "));
-    Some(c)
+    Some(ifaces)
 }
 
 /// Mounted filesystems from getfsstat(2). MNT_NOWAIT returns what the
@@ -1272,6 +1302,16 @@ fn rd_u64(b: &[u8], o: usize) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_link_has_an_address() {
+        let ifaces = iflist2().expect("NET_RT_IFLIST2");
+        // A Mac without Wi-Fi or Ethernet up has none; nothing to check then.
+        if let Some(l) = link(&ifaces) {
+            eprintln!("{l:?}");
+            assert!(l.name.starts_with("en") && l.ipv4.is_some(), "{l:?}");
+        }
+    }
 
     #[test]
     fn root_volume_is_its_apfs_container() {

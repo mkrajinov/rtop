@@ -76,6 +76,32 @@ pub fn native() -> Box<dyn Collector> {
     Box::new(macos::MacCollector::new())
 }
 
+/// (interface, IPv4 address) for every interface that is up, from
+/// getifaddrs(3).
+pub fn ipv4_addrs() -> Vec<(String, std::net::Ipv4Addr)> {
+    let mut out = Vec::new();
+    let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+    if unsafe { libc::getifaddrs(&mut head) } != 0 {
+        return out;
+    }
+    let mut cur = head;
+    while !cur.is_null() {
+        // SAFETY: getifaddrs returned a valid list, freed below.
+        let ifa = unsafe { &*cur };
+        cur = ifa.ifa_next;
+        let up = ifa.ifa_flags & libc::IFF_UP as u32 != 0;
+        if !up || ifa.ifa_addr.is_null() || unsafe { (*ifa.ifa_addr).sa_family } as i32 != libc::AF_INET {
+            continue;
+        }
+        // SAFETY: an AF_INET address is a sockaddr_in.
+        let sin = unsafe { &*(ifa.ifa_addr as *const libc::sockaddr_in) };
+        let name = unsafe { std::ffi::CStr::from_ptr(ifa.ifa_name) }.to_string_lossy().into_owned();
+        out.push((name, std::net::Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr))));
+    }
+    unsafe { libc::freeifaddrs(head) };
+    out
+}
+
 /// uid -> user name, resolved through `getpwuid_r(3)` once per uid.
 #[derive(Default)]
 pub struct UserCache(HashMap<u32, String>);

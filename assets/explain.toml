@@ -808,3 +808,16 @@ pitfalls = [
 ]
 try = ["cat /proc/loadavg", "uptime", "sysctl vm.loadavg", "vmstat 1   # column r is the run queue", "ps -eo stat | grep -c '^D'"]
 man = ["proc_loadavg(5)", "getloadavg(3)", "uptime(1)"]
+
+[net_link]
+title = "Network link — interface, address, speed and totals"
+what = "The network card's title names the interface traffic leaves by, its IPv4 address and the speed its driver negotiated. Addresses belong to interfaces, not to the machine: a laptop has one per active interface (Wi-Fi, Ethernet, VPN tunnel), and loopback 127.0.0.1 besides. The totals in the head lines (↓ in 2.1M/s · 14G) are the interface byte counters themselves; the rates above them are the difference between two samples. The counters start at zero when the interface comes up, not at boot, so a reconnected Wi-Fi starts over."
+linux = "The interface of the default route: the row of /proc/net/route whose Destination is 00000000, lowest Metric first (what `ip route get 1.1.1.1` would pick without policy routing). The address comes from getifaddrs(3), the speed from /sys/class/net/IF/speed in Mb/s, which is -1 or unreadable when the link is down or the driver doesn't report one (Wi-Fi). Totals are bytes from /proc/net/dev."
+macos = "The first active en* interface with an IPv4 address, from getifaddrs(3). Its speed is ifi_baudrate in the interface's if_data64 from sysctl NET_RT_IFLIST2; for Wi-Fi that is the current transmit rate and changes with signal quality. Under a VPN the default route goes through a utun interface (route -n get default), but the traffic still crosses en0 encrypted, which is the interface shown."
+pitfalls = [
+  "Link speed is what the two ends negotiated, not throughput: a 1 Gb/s link behind a 100 Mb/s uplink moves 100 Mb/s at best.",
+  "Inside a container, eth0 is one end of a veth pair: its speed (often 10000) is made up by the driver and says nothing about the host's NIC.",
+  "Bytes/s on the card are bytes; link speeds are bits. 1 Gb/s is about 119M/s.",
+]
+try = ["ip -br addr", "ip route get 1.1.1.1", "cat /sys/class/net/eth0/speed", "ethtool eth0", "ifconfig en0", "route -n get default", "netstat -ib"]
+man = ["getifaddrs(3)", "ip-route(8)", "netstat(1)"]

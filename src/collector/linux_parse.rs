@@ -1006,6 +1006,22 @@ pub fn psi(text: &str) -> Option<Pressure> {
     Some(Pressure::Psi { some10: avg10("some ")?, full10: avg10("full ").unwrap_or(0.0) })
 }
 
+/// The interface of the default route: the first /proc/net/route row
+/// whose destination is 00000000 (0.0.0.0/0), lowest metric first.
+pub fn default_route_iface(text: &str) -> Option<String> {
+    text.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            if *f.get(1)? != "00000000" {
+                return None;
+            }
+            Some((f.get(6)?.parse::<u32>().ok()?, f[0].to_string()))
+        })
+        .min()
+        .map(|(_, name)| name)
+}
+
 /// One line of /proc/self/mountinfo.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mount {
@@ -1199,6 +1215,16 @@ mod tests {
         let s = system("", "", "9.76 6.24 4.43 4/2565 36658\n", "");
         assert_eq!(s.run_queue, Some((4, 2565)));
         assert_eq!(s.load[0], 9.76f32 as f64);
+    }
+
+    #[test]
+    fn default_route() {
+        let route = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n\
+            wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\n\
+            eth0\t00000000\t010011AC\t0003\t0\t0\t100\t00000000\n\
+            eth0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\n";
+        assert_eq!(default_route_iface(route).as_deref(), Some("eth0"), "lowest metric wins");
+        assert_eq!(default_route_iface("Iface\tDestination\n"), None);
     }
 
     #[test]

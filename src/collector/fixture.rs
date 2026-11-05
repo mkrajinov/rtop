@@ -131,6 +131,12 @@ impl Default for FixtureCollector {
                     swap_io: Some(IoCounters { read: 4 << 12, write: 9 << 12, source: "/proc/vmstat".into() }),
                     pressure: Some(Pressure::Psi { some10: 3.4, full10: 0.8 }),
                     run_queue: Some((2, 312)),
+                    link: Some(NetLink {
+                        name: "eth0".into(),
+                        ipv4: Some("10.0.2.15".into()),
+                        speed_mbps: Some(1000),
+                        source: "/proc/net/route".into(),
+                    }),
                 },
                 processes: vec![init, shell, hog, zombie],
                 clock: None,

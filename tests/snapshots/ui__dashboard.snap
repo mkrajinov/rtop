@@ -10,8 +10,8 @@ expression: "screen.lines().take(16).collect::<Vec<_>>().join(\"\\n\")"
  │                                                  P3  ■■■■■■■■■■   0%  │ │ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ │ │ tasks  4  ● 1 zombie  ● 0 in D   │
  │                                               ⢀                       │ │                                 ▃ │ │ fans   2400 rpm                  │
  ╰───────────────────────────────────────────────────────────────────────╯ ╰───────────────────────────────────╯ ╰──────────────────────────────────╯
- ╭ network ──────────────────────────────────────── eth0 · /proc/net/dev ╮ ╭ disk ────── vda · /proc/diskstats ╮ ╭ gpu ─────────────────────────────╮
- │ ↓ in 0B/s                 max 0B/s  ↑ out 0B/s               max 0B/s │ │ read 0B/s       /var/li… ■■■  90% │ │ No GPU counters.                 │
+ ╭ network ────────────── eth0 10.0.2.15 · 1 Gb/s · eth0 · /proc/net/dev ╮ ╭ disk ────── vda · /proc/diskstats ╮ ╭ gpu ─────────────────────────────╮
+ │ ↓ in 0B/s · 1.0G          max 0B/s  ↑ out 0B/s · 256M        max 0B/s │ │ read 0B/s       /var/li… ■■■  90% │ │ No GPU counters.                 │
  │                                                                       │ │              ⢀  /        ■■■  74% │ │                                  │
  │                                                                       │ │ write 0B/s      /boot    ■■■  21% │ │                                  │
  │                                                                       │ │              ⢀  1 more · v list   │ │                                  │

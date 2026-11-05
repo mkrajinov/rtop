@@ -167,6 +167,18 @@ fn disk() -> Option<IoCounters> {
     sum(rows, "/sys/block", whole, "/proc/diskstats")
 }
 
+/// The default route's interface, its address and negotiated speed.
+fn link() -> Option<NetLink> {
+    let name = lp::default_route_iface(&read("/proc/net/route")?)?;
+    let ipv4 = super::ipv4_addrs().into_iter().find(|(n, _)| *n == name).map(|(_, a)| a.to_string());
+    // -1 (or EINVAL) when the link is down or the driver doesn't say.
+    let speed_mbps = read(&format!("/sys/class/net/{name}/speed"))
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .filter(|&s| s > 0)
+        .map(|s| s as u64);
+    Some(NetLink { name, ipv4, speed_mbps, source: "/proc/net/route, getifaddrs, /sys/class/net/*/speed".into() })
+}
+
 /// Mounted filesystems from /proc/self/mountinfo, sized with statvfs(3).
 /// Network and FUSE mounts are listed but not read: statvfs on a hung NFS
 /// server blocks until it answers.
@@ -264,6 +276,7 @@ impl Collector for LinuxCollector {
             swap_io: read("/proc/vmstat")
                 .and_then(|t| lp::vmstat_swap(&t, self.env.page_size, "/proc/vmstat pswpin, pswpout")),
             pressure: read("/proc/pressure/memory").and_then(|t| lp::psi(&t)),
+            link: link(),
             ..system
         };
         let mut processes = Vec::new();

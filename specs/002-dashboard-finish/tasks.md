@@ -32,10 +32,10 @@
 
 ## Phase 5: User Story 4 — network totals, address, speed (P4)
 
-- [ ] T040 [US4] `NetLink` in model; `default_route_iface()` parser for `/proc/net/route` + fixture
-- [ ] T041 [US4] Linux and macOS collection (`getifaddrs`, speed)
-- [ ] T042 [US4] Network card title and totals in head lines
-- [ ] T043 [US4] Explain `net_link`; README; snapshots; ROADMAP tick
+- [x] T040 [US4] `NetLink` in model; `default_route_iface()` parser for `/proc/net/route` + fixture
+- [x] T041 [US4] Linux and macOS collection (`getifaddrs`, speed)
+- [x] T042 [US4] Network card title and totals in head lines
+- [x] T043 [US4] Explain `net_link`; README; snapshots; ROADMAP tick
 
 ## Phase 6: Polish
 

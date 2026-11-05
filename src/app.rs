@@ -124,7 +124,8 @@ impl Column {
 /// shows them (User Story 4).
 /// What the dashboard cards teach, in the order `L` shows them after any
 /// Kubernetes lessons.
-pub const DASH_LESSONS: &[&str] = &["volumes", "apfs_container", "swap_activity", "mem_pressure", "run_queue"];
+pub const DASH_LESSONS: &[&str] =
+    &["volumes", "apfs_container", "swap_activity", "mem_pressure", "run_queue", "net_link"];
 
 pub const KUBE_LESSONS: &[&str] = &[
     "container_meminfo",
