@@ -16,17 +16,17 @@ expression: screen
  │                                                                       │ │ write 0B/s      /boot    ■■■  21% │ │                                  │
  │                                                                       │ │              ⢀  1 more · v list   │ │                                  │
  │                                  ⢀                                  ⢀ │ │                                   │ │                                  │
- ╰──────────────────╭ volumes · v or Esc closes ─────────────────────────────────────────────────────────────────────────────────╮──────────────────╯
- ╭ processes 4 ─────│ MOUNT                                        TYPE     DEVICE               SIZE     USED     FREE  USE%    │──────────────────╮
- │     PID  USER    │ /var/lib/docker                              xfs      /dev/vdb             256G     230G    26.0G   90%    │                  │
- │     201  learner │ /                                            ext4     /dev/vda1           64.0G    45.0G    16.0G   74%    │                  │
- │     200  learner │ /boot                                        ext4     /dev/vda2            1.0G     200M     760M   21%    │                  │
- │     100  learner │ /srv/nfs                                     nfs4     fs1:/export             -        -        -     -    │                  │
- │       1  root    │   not read: a network or FUSE filesystem can block statvfs                                                 │                  │
+ ╰───────────────────────────────────────────────────────────────────────╯ ╰───────────────────────────────────╯ ╰──────────────────────────────────╯
+ ╭ processes 4 ─────╭ volumes · v or Esc closes ─────────────────────────────────────────────────────────────────────────────────╮──────────────────╮
+ │     PID  USER    │ MOUNT                                        TYPE     DEVICE               SIZE     USED     FREE  USE%    │                  │
+ │     201  learner │ /var/lib/docker                              xfs      /dev/vdb             256G     230G    26.0G   90%    │                  │
+ │     200  learner │ /                                            ext4     /dev/vda1           64.0G    45.0G    16.0G   74%    │                  │
+ │     100  learner │ /boot                                        ext4     /dev/vda2            1.0G     200M     760M   21%    │                  │
+ │       1  root    │ /srv/nfs                                     nfs4     fs1:/export             -        -        -     -    │                  │
+ │                  │ dimmed: hidden by the system (nobrowse) or not read (network, FUSE)                                        │                  │
  │                  │                                                                                                            │                  │
- │                  │ source: /proc/self/mountinfo + statvfs · used % = used / (used + free), as df                              │                  │
- │                  │                                                                                                            │                  │
- │                  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯                  │
+ │                  ╰ /proc/self/mountinfo + statvfs · used % = used / (used + free), as df ─────────────────────────────────────╯                  │
+ │                                                                                                                                                  │
  │                                                                                                                                                  │
  │                                                                                                                                                  │
  │                                                                                                                                                  │

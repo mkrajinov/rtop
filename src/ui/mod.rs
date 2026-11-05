@@ -217,13 +217,22 @@ fn draw_signals(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, r, &mut state);
 }
 
-/// `v`: every volume, including the ones the disk card leaves out.
+/// `v`: every volume, including the ones the disk card leaves out. Volumes
+/// the system hides (nobrowse) are dimmed; the source is in the bottom
+/// border so a long list can't push it off.
 fn draw_volumes(f: &mut Frame, app: &App, area: Rect) {
     let vols = app.snapshot.system.volumes.as_ref();
-    let rows = vols.map_or(0, |v| v.list.len() + v.list.iter().filter(|v| v.note.is_some()).count());
-    let r = centered(area, 110, rows as u16 + 6);
+    let notes = vols.map_or(0, |v| v.list.iter().filter(|v| v.shown && v.note.is_some()).count() * 2);
+    let rows = vols.map_or(1, |v| v.list.len() + notes + 2);
+    let r = centered(area, 110, rows as u16 + 3);
     f.render_widget(Clear, r);
-    let block = panel("volumes · v or Esc closes");
+    let mut block = panel("volumes · v or Esc closes");
+    if let Some(v) = vols {
+        block = block.title_bottom(Line::from(Span::styled(
+            format!(" {} · used % = used / (used + free), as df ", v.source),
+            theme::faint(),
+        )));
+    }
     let inner = block.inner(r);
     f.render_widget(block, r);
     let Some(vols) = vols else {
@@ -246,28 +255,46 @@ fn draw_volumes(f: &mut Frame, app: &App, area: Rect) {
     let cut = |s: &str, n: usize| {
         if s.chars().count() <= n { s.to_string() } else { format!("{}…", s.chars().take(n - 1).collect::<String>()) }
     };
-    for v in &vols.list {
-        let style = if v.shown { theme::text() } else { theme::dim() };
+    let room = inner.height as usize;
+    let mut hidden = 0;
+    for (i, v) in vols.list.iter().enumerate() {
+        let need = 1 + usize::from(v.shown && v.note.is_some());
+        // Keep the last row for "… N more".
+        if lines.len() + need > room.saturating_sub(1) && i + 1 < vols.list.len() {
+            lines.push(Line::from(Span::styled(
+                format!("… {} more; hidden ones are dimmed", vols.list.len() - i),
+                theme::faint(),
+            )));
+            break;
+        }
+        if !v.shown {
+            hidden += 1;
+        }
+        let style = if v.shown { theme::text() } else { theme::faint() };
         let num = |n: u64| if v.size == 0 { "-".to_string() } else { crate::fmt::bytes(n) };
         let pct = if v.size == 0 { "-".to_string() } else { format!("{:.0}%", v.percent()) };
+        let pct_style = if v.shown { Style::default().fg(theme::level(v.percent())) } else { theme::faint() };
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{:<w$} {:<8} {:<16} ", cut(&v.mount, w), cut(&v.fstype, 8), cut(&v.device, 16)),
                 style,
             ),
             Span::styled(format!("{:>8} {:>8} {:>8} ", num(v.size), num(v.used), num(v.free)), style),
-            Span::styled(format!("{pct:>5}"), Style::default().fg(theme::level(v.percent()))),
+            Span::styled(format!("{pct:>5}"), pct_style),
         ]));
-        if let Some(n) = &v.note {
-            lines.push(Line::from(Span::styled(format!("  {n}"), theme::faint())));
+        // Notes for the shown ones (APFS containers); hidden ones are
+        // explained once below.
+        if let (true, Some(n)) = (v.shown, &v.note) {
+            lines.push(Line::from(Span::styled(format!("  {}", cut(n, inner.width as usize - 2)), theme::faint())));
         }
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("source: {} · used % = used / (used + free), as df", vols.source),
-        theme::faint(),
-    )));
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    if hidden > 0 && lines.len() < room {
+        lines.push(Line::from(Span::styled(
+            "dimmed: hidden by the system (nobrowse) or not read (network, FUSE)",
+            theme::faint(),
+        )));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
