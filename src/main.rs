@@ -120,9 +120,10 @@ fn main() -> anyhow::Result<()> {
     install_quit_signals()?;
     let mut terminal = ratatui::init();
     let result = run(&mut terminal, &mut app);
-    ratatui::restore();
-    // Dropping the app kills the lab's process group.
+    // Dropping the app kills the lab's process group. First, because
+    // restoring a terminal that hung up can fail and end the process.
     drop(app);
+    restore();
     Ok(result?)
 }
 
@@ -147,11 +148,56 @@ fn install_quit_signals() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// True once the terminal rtop draws on has hung up (its window, tmux
+/// session or SSH connection closed).
+///
+/// A hangup normally arrives as SIGHUP, but not always: a process started
+/// in the background of a shell, or one whose session leader died first,
+/// gets none. Its tty then reads as end-of-file forever, and crossterm's
+/// `event::poll` turns that into a busy loop until its timeout. So check
+/// the tty ourselves: `poll(2)` reports `POLLHUP` (or `POLLNVAL`/`POLLERR`)
+/// on a terminal with nobody on the other side.
+fn terminal_gone() -> bool {
+    use std::os::fd::AsRawFd;
+    use std::sync::OnceLock;
+    // crossterm reads stdin when it is a terminal, else /dev/tty.
+    static TTY: OnceLock<Option<std::fs::File>> = OnceLock::new();
+    // SAFETY: isatty only inspects the descriptor.
+    let fd = if unsafe { libc::isatty(0) } == 1 {
+        0
+    } else {
+        match TTY.get_or_init(|| std::fs::File::open("/dev/tty").ok()) {
+            Some(f) => f.as_raw_fd(),
+            None => return false,
+        }
+    };
+    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    // SAFETY: one valid pollfd, zero timeout.
+    let n = unsafe { libc::poll(&mut p, 1, 0) };
+    let gone = n > 0 && p.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0;
+    if gone {
+        // Same path as SIGHUP, so labs and helper pods are still cleaned up.
+        on_quit_signal(libc::SIGHUP);
+    }
+    gone
+}
+
+/// Give the terminal back (main screen, cooked mode), unless it hung up:
+/// then there is nobody to give it to, and ratatui's error message on a
+/// dead stderr would panic. Returns whether the terminal is still there.
+fn restore() -> bool {
+    if terminal_gone() {
+        return false;
+    }
+    ratatui::restore();
+    true
+}
+
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()> {
     app.refresh();
     let mut last = Instant::now();
     let mut dirty = true;
-    while !app.quit && !app.back && !QUIT.load(Ordering::Relaxed) {
+    while !app.quit && !app.back && !QUIT.load(Ordering::Relaxed) && !terminal_gone() {
         if dirty {
             terminal.draw(|f| ui::draw(f, app))?;
             dirty = false;
@@ -219,9 +265,10 @@ fn k8s(args: K8sArgs, tick: Duration) -> anyhow::Result<()> {
 
     let mut terminal = ratatui::init();
     let result = k8s_loop(&mut terminal, &mut picker, first, &args, tick);
-    ratatui::restore();
     // The views are gone by now, and with them their helper pods.
-    print_leftovers();
+    if restore() {
+        print_leftovers();
+    }
     Ok(result?)
 }
 
@@ -361,7 +408,7 @@ fn pick(
 
     let mut opening: Option<Opening> = None;
     let result = loop {
-        if QUIT.load(Ordering::Relaxed) {
+        if QUIT.load(Ordering::Relaxed) || terminal_gone() {
             break None;
         }
         picker.tick();
