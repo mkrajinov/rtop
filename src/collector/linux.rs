@@ -16,6 +16,7 @@ pub struct LinuxCollector {
     cmdlines: HashMap<(Pid, u64), Vec<u8>>,
     cpu: CpuInfo,
     volumes: super::space::Cache,
+    io: bool,
 }
 
 impl LinuxCollector {
@@ -31,6 +32,7 @@ impl LinuxCollector {
             cmdlines: HashMap::new(),
             cpu: cpu_info(),
             volumes: super::space::Cache::new(),
+            io: false,
         }
     }
 }
@@ -295,12 +297,20 @@ impl Collector for LinuxCollector {
                 .or_insert_with(|| fs::read(format!("{dir}/cmdline")).unwrap_or_default())
                 .clone();
             let user = self.users.name(uid);
-            if let Ok(p) = lp::process_row(&stat, uid, user, &cmd, fds, &self.env) {
+            if let Ok(mut p) = lp::process_row(&stat, uid, user, &cmd, fds, &self.env) {
+                // ptrace-gated: another user's process is EACCES unless root.
+                if self.io {
+                    p.io = read(&format!("{dir}/io")).and_then(|t| lp::io_bytes(&t));
+                }
                 processes.push(p);
             }
         }
         self.cmdlines.retain(|k, _| live.contains(k));
         Snapshot { system, processes, clock: None, containers: Vec::new() }
+    }
+
+    fn set_io(&mut self, on: bool) {
+        self.io = on;
     }
 
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
@@ -411,6 +421,11 @@ mod tests {
         let snap = c.snapshot();
         let p = snap.processes.iter().find(|p| p.pid == me).expect("own pid listed");
         assert!(p.rss > 0 && p.threads >= 1 && p.fds.is_some());
+        assert!(p.io.is_none(), "I/O is only read while the columns are shown");
+        c.set_io(true);
+        let snap2 = c.snapshot();
+        let p = snap2.processes.iter().find(|p| p.pid == me).expect("own pid listed");
+        assert!(p.io.is_some(), "own /proc/self/io is readable");
         assert!(!snap.system.cores.is_empty() && snap.system.mem_total > 0);
         let (net, disk) = (snap.system.net.as_ref().unwrap(), snap.system.disk.as_ref().unwrap());
         assert!(net.read > 0 && disk.read > 0, "{net:?} {disk:?}");

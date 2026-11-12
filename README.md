@@ -45,6 +45,7 @@ See [Kubernetes](#kubernetes) for what each mode adds to the cluster and the per
 | | `+` `-` | renice |
 | | `p` | pause refreshing |
 | | `c` | show / hide executable paths |
+| | `i` | READ/s and WRITE/s columns: storage bytes per second per process (read only while shown) |
 | | `T` | theme picker (live preview, Enter saves) |
 | | `v` | every mounted volume: size, used, free (the disk card shows the fullest) |
 | | `L` | next lesson in the explain panel (dashboard cards; Kubernetes ones first in `rtop k8s`) |
@@ -74,6 +75,7 @@ data source.
 | fans (system card) | AppleSMC keys `FNum`, `F<n>Ac`, `F<n>Mx` | `/sys/class/hwmon/*/fan*_input` |
 | network | `sysctl NET_RT_IFLIST2` (64-bit counters), `en*` interfaces only | `/proc/net/dev`, interfaces with a `/sys/class/net/*/device` |
 | disk | IOKit `IOBlockStorageDriver` → `Statistics` | `/proc/diskstats`, whole disks from `/sys/block` |
+| READ/s, WRITE/s (`i`) | `proc_pid_rusage(RUSAGE_INFO_V4)` `ri_diskio_bytesread`/`byteswritten` | `/proc/PID/io` `read_bytes`/`write_bytes` (ptrace-gated); not read in `rtop k8s` |
 | volumes (disk card, `v`) | `getfsstat(MNT_NOWAIT)` → `statfs`; one row per APFS container, `nobrowse` ones only in `v` | `/proc/self/mountinfo` + `statvfs`; network and FUSE mounts listed, not read |
 | swap ↓ in ↑ out, memory pressure (memory card) | `host_statistics64` `swapins`/`swapouts`; `kern.memorystatus_vm_pressure_level` | `/proc/vmstat` `pswpin`/`pswpout`; `/proc/pressure/memory` `some avg10` |
 | load graph, `runq` (system card) | `getloadavg`; run queue counted from process states (macOS has no counter) | `/proc/loadavg` (averages, then runnable/total) |

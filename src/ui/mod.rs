@@ -149,6 +149,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
                 ("/", "filter"),
                 ("t", "tree"),
                 ("c", "paths"),
+                ("i", "I/O"),
                 ("f", "family"),
                 ("k", "signal"),
                 ("+-", "nice"),
@@ -298,7 +299,7 @@ fn draw_volumes(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    let r = centered(area, 78, 39);
+    let r = centered(area, 78, 40);
     f.render_widget(Clear, r);
     let h = |k: &str, d: &str| {
         Line::from(vec![
@@ -319,6 +320,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         h("t", "tree view (parent → children)"),
         h("f", "show only the selected process and its descendants"),
         h("c", "show / hide executable paths in COMMAND"),
+        h("i", "READ/s and WRITE/s: storage bytes per second for each process"),
         h("T", "theme: pick a colour theme and accent, Enter saves"),
         h("D", "graph style: glow, braille, chart, octant"),
         h("k", "send a signal"),

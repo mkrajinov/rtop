@@ -41,6 +41,36 @@ impl CpuTracker {
     }
 }
 
+/// Per-process storage I/O rates. Like CPU%, the kernel only keeps totals;
+/// the rate is the difference between two samples over the time between.
+#[derive(Default)]
+pub struct IoTracker {
+    /// Keyed by (process, start time) so a recycled PID starts over.
+    prev: HashMap<(ProcId, u64), [u64; 2]>,
+    last: Option<Instant>,
+}
+
+impl IoTracker {
+    pub fn update(&mut self, procs: &mut [Process], now: Instant) {
+        let secs = self.last.map(|t| now.duration_since(t).as_secs_f64().max(1e-3));
+        let mut next = HashMap::new();
+        for p in procs.iter_mut() {
+            let Some(io) = p.io else {
+                p.io_rate = None;
+                continue;
+            };
+            let key = (p.id(), p.start_time);
+            p.io_rate = match (secs, self.prev.get(&key)) {
+                (Some(s), Some(prev)) => Some([0, 1].map(|i| (io[i].saturating_sub(prev[i]) as f64 / s) as f32)),
+                _ => None,
+            };
+            next.insert(key, io);
+        }
+        self.prev = next;
+        self.last = Some(now);
+    }
+}
+
 /// Per-core utilisation: busy delta / total delta between two samples.
 #[derive(Default)]
 pub struct CoreTracker {
@@ -89,6 +119,32 @@ impl RateTracker {
 mod tests {
     use super::*;
     use crate::collector::fixture::process;
+
+    #[test]
+    fn io_rate_needs_two_samples_and_never_goes_negative() {
+        let mut t = IoTracker::default();
+        let start = Instant::now();
+        let mut p = process(7, 1, "dd");
+        p.io = Some([1000, 0]);
+        let mut unread = process(8, 1, "secret");
+        t.update(std::slice::from_mut(&mut p), start);
+        assert_eq!(p.io_rate, None, "first sample has no rate");
+        p.io = Some([3000, 4000]);
+        let mut both = [p.clone(), unread.clone()];
+        t.update(&mut both, start + Duration::from_secs(2));
+        assert_eq!(both[0].io_rate, Some([1000.0, 2000.0]));
+        assert_eq!(both[1].io_rate, None, "no counters, no rate");
+        // A counter that went backwards, and a recycled PID.
+        both[0].io = Some([10, 4000]);
+        unread.io = Some([5, 5]);
+        both[1] = unread;
+        t.update(&mut both, start + Duration::from_secs(3));
+        assert_eq!(both[0].io_rate, Some([0.0, 0.0]));
+        let mut recycled = both[0].clone();
+        recycled.start_time += 1;
+        t.update(std::slice::from_mut(&mut recycled), start + Duration::from_secs(4));
+        assert_eq!(recycled.io_rate, None);
+    }
 
     #[test]
     fn percent_is_delta_over_wall_time() {

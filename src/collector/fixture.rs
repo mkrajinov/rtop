@@ -26,6 +26,8 @@ pub fn process(pid: Pid, ppid: Pid, name: &str) -> Process {
         fds: Some(4),
         start_time: 1_700_000_000,
         restricted: false,
+        io: None,
+        io_rate: None,
         origin: None,
     }
 }
@@ -35,7 +37,14 @@ pub struct FixtureCollector {
     /// Pretend to read a Kubernetes target.
     pub target: Option<Target>,
     pub link: Option<Link>,
+    /// Samples taken with per-process I/O on; each is one second after the
+    /// last, so the rates are exact.
+    pub io: Option<u64>,
+    pub start: std::time::Instant,
 }
+
+/// Storage bytes per second the fixture processes read and write.
+const IO_RATES: [(Pid, [u64; 2]); 2] = [(100, [4096, 0]), (200, [128 << 10, 2 << 20])];
 
 impl Default for FixtureCollector {
     fn default() -> Self {
@@ -144,6 +153,8 @@ impl Default for FixtureCollector {
             },
             target: None,
             link: None,
+            io: None,
+            start: std::time::Instant::now(),
         }
     }
 }
@@ -154,7 +165,21 @@ impl Collector for FixtureCollector {
     }
 
     fn snapshot(&mut self) -> Snapshot {
-        self.snapshot.clone()
+        let mut snap = self.snapshot.clone();
+        if let Some(n) = self.io.as_mut() {
+            *n += 1;
+            snap.clock = Some(self.start + std::time::Duration::from_secs(*n));
+            for p in &mut snap.processes {
+                // init stands for a process rtop may not inspect.
+                p.io = IO_RATES.iter().find(|r| r.0 == p.pid).map(|(_, r)| r.map(|v| (1 << 30) + v * *n));
+            }
+        }
+        snap
+    }
+
+    /// Like the Kubernetes collector, a pretend target reads no I/O.
+    fn set_io(&mut self, on: bool) {
+        self.io = (on && self.target.is_none()).then_some(0);
     }
 
     fn target(&self) -> Option<&Target> {

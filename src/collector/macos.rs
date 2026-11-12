@@ -77,6 +77,7 @@ pub struct MacCollector {
     cmdlines: HashMap<(Pid, u64), String>,
     cpu: CpuInfo,
     volumes: super::space::Cache,
+    io: bool,
 }
 
 impl MacCollector {
@@ -92,6 +93,7 @@ impl MacCollector {
             page_size: unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64,
             cmdlines: HashMap::new(),
             volumes: super::space::Cache::new(),
+            io: false,
             cpu: CpuInfo {
                 model: sysctl_string("machdep.cpu.brand_string").unwrap_or_default(),
                 kinds: super::iokit::core_kinds(),
@@ -195,6 +197,13 @@ impl Collector for MacCollector {
                 fds: task.and_then(|_| list_fds(pid)).map(|f| f.len() as u32),
                 start_time: start,
                 restricted: task.is_none() && bsd.pbi_status != libc::SZOMB,
+                // Same permission as PROC_PIDTASKINFO: EPERM for other users.
+                io: if self.io && task.is_some() {
+                    rusage_v4(pid).map(|r| [r.ri_diskio_bytesread, r.ri_diskio_byteswritten])
+                } else {
+                    None
+                },
+                io_rate: None,
                 origin: None,
             });
         }
@@ -202,6 +211,10 @@ impl Collector for MacCollector {
         self.cmdlines.retain(|k, _| live.contains(k));
         let system = SystemInfo { volumes: self.volumes.get(volumes), ..self.system() };
         Snapshot { system, processes, clock: None, containers: Vec::new() }
+    }
+
+    fn set_io(&mut self, on: bool) {
+        self.io = on;
     }
 
     fn details(&mut self, id: ProcId) -> anyhow::Result<ProcessDetails> {
@@ -1338,6 +1351,10 @@ mod tests {
         let snap = c.snapshot();
         let p = snap.processes.iter().find(|p| p.pid == me).expect("own pid listed");
         assert!(p.rss > 0 && p.threads >= 1 && !p.restricted);
+        assert!(p.io.is_none(), "I/O is only read while the columns are shown");
+        c.set_io(true);
+        let again = c.snapshot();
+        assert!(again.processes.iter().find(|p| p.pid == me).is_some_and(|p| p.io.is_some()), "own rusage is readable");
         assert!(snap.processes.iter().any(|p| p.pid == 1 && p.name == "launchd"), "root's launchd via kinfo_proc");
         let d = c.details(ProcId::local(me)).unwrap();
         assert!(d.files.iter().any(|f| f.fd == 0 || f.fd == 1 || f.fd == 2));

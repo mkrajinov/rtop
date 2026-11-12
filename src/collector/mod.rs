@@ -44,6 +44,10 @@ pub trait Collector {
     fn signal(&mut self, _id: ProcId, _signal: &str) -> anyhow::Result<()> {
         anyhow::bail!("not supported here")
     }
+    /// Read per-process storage I/O (`Process::io`) from the next snapshot
+    /// on, or stop reading it. Off by default: it costs a file read
+    /// (Linux) or a syscall (macOS) per process per tick.
+    fn set_io(&mut self, _on: bool) {}
     /// Results and events to show in the status line once.
     fn messages(&mut self) -> Vec<String> {
         Vec::new()

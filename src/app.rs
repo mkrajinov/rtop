@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use nix::sys::signal::Signal;
 
-use crate::collector::cpu::{CoreTracker, CpuTracker, RateTracker};
+use crate::collector::cpu::{CoreTracker, CpuTracker, IoTracker, RateTracker};
 use crate::collector::{self, Collector};
 use crate::explain::Catalog;
 use crate::labs::LabSession;
@@ -28,6 +28,10 @@ pub enum Column {
     Mem,
     Vsz,
     Rss,
+    /// Shown with `i`.
+    Read,
+    /// Shown with `i`.
+    Write,
     Threads,
     Fds,
     Time,
@@ -35,7 +39,7 @@ pub enum Column {
 }
 
 impl Column {
-    pub const ALL: [Column; 15] = [
+    pub const ALL: [Column; 17] = [
         Column::Pid,
         Column::Pod,
         Column::Container,
@@ -47,6 +51,8 @@ impl Column {
         Column::Mem,
         Column::Vsz,
         Column::Rss,
+        Column::Read,
+        Column::Write,
         Column::Threads,
         Column::Fds,
         Column::Time,
@@ -66,6 +72,8 @@ impl Column {
             Column::Mem => "MEM%",
             Column::Vsz => "VSZ",
             Column::Rss => "RSS",
+            Column::Read => "READ/s",
+            Column::Write => "WRITE/s",
             Column::Threads => "THR",
             Column::Fds => "FD",
             Column::Time => "TIME+",
@@ -87,6 +95,8 @@ impl Column {
             Column::Mem => "mem_percent",
             Column::Vsz => "vsz",
             Column::Rss => "rss",
+            Column::Read => "io_read",
+            Column::Write => "io_write",
             Column::Threads => "threads",
             Column::Fds => "fds",
             Column::Time => "cpu_time",
@@ -111,6 +121,9 @@ impl Column {
             Column::Cpu => a.cpu_percent.total_cmp(&b.cpu_percent),
             Column::Mem | Column::Rss => a.rss.cmp(&b.rss),
             Column::Vsz => a.vsz.cmp(&b.vsz),
+            // Unknown sorts below zero.
+            Column::Read => io_rate(a, 0).total_cmp(&io_rate(b, 0)),
+            Column::Write => io_rate(a, 1).total_cmp(&io_rate(b, 1)),
             Column::Threads => a.threads.cmp(&b.threads),
             Column::Fds => a.fds.cmp(&b.fds),
             Column::Time => a.cpu_time_ns.cmp(&b.cpu_time_ns),
@@ -118,6 +131,10 @@ impl Column {
         }
         .then(a.pid.cmp(&b.pid))
     }
+}
+
+fn io_rate(p: &Process, i: usize) -> f32 {
+    p.io_rate.map_or(-1.0, |r| r[i])
 }
 
 /// What the explain panel teaches about Kubernetes, in the order `L`
@@ -303,6 +320,7 @@ pub struct App {
     pub collector: Box<dyn Collector>,
     pub catalog: Catalog,
     cpu: CpuTracker,
+    io: IoTracker,
     cores: CoreTracker,
     pub core_usage: Vec<f32>,
     /// Average CPU% and memory% over time, newest last, for the header graphs.
@@ -321,6 +339,8 @@ pub struct App {
     pub gpu_hist: VecDeque<f32>,
     /// Show the executable's directory in COMMAND (toggled with `c`).
     pub show_path: bool,
+    /// `i`: READ/s and WRITE/s columns, read only while shown.
+    pub show_io: bool,
     pub snapshot: Snapshot,
     pub rows: Vec<Row>,
     pub selected: usize,
@@ -365,6 +385,7 @@ impl App {
             collector,
             catalog: Catalog::load(),
             cpu: CpuTracker::default(),
+            io: IoTracker::default(),
             cores: CoreTracker::default(),
             core_usage: Vec::new(),
             cpu_hist: VecDeque::new(),
@@ -378,6 +399,7 @@ impl App {
             disk_hist: Default::default(),
             gpu_hist: VecDeque::new(),
             show_path: false,
+            show_io: false,
             snapshot: Snapshot::default(),
             rows: Vec::new(),
             selected: 0,
@@ -437,6 +459,7 @@ impl App {
         }
         let now = snap.clock.unwrap_or_else(Instant::now);
         self.cpu.update(&mut snap.processes, now);
+        self.io.update(&mut snap.processes, now);
         self.core_usage = self.cores.update(&snap.system.cores);
         let sys = &snap.system;
         let avg = self.core_usage.iter().sum::<f32>() / self.core_usage.len().max(1) as f32;
@@ -749,6 +772,7 @@ impl App {
             }
             KeyCode::Char('/') => self.mode = Mode::Filter,
             KeyCode::Char('c') => self.show_path = !self.show_path,
+            KeyCode::Char('i') => self.toggle_io(),
             KeyCode::Char('t') => {
                 self.tree = !self.tree;
                 self.rebuild();
@@ -781,7 +805,33 @@ impl App {
     pub fn columns(&self) -> Vec<Column> {
         let remote = self.collector.target().is_some();
         let node = matches!(self.collector.target(), Some(Target::Node { .. }));
-        Column::ALL.into_iter().filter(|&c| (remote || c != Column::Container) && (node || c != Column::Pod)).collect()
+        let io = self.show_io;
+        Column::ALL
+            .into_iter()
+            .filter(|&c| (remote || c != Column::Container) && (node || c != Column::Pod))
+            .filter(|&c| io || !matches!(c, Column::Read | Column::Write))
+            .collect()
+    }
+
+    /// `i`: show or hide READ/s and WRITE/s. The rates need two samples, so
+    /// the columns stay empty until the next refresh.
+    fn toggle_io(&mut self) {
+        self.show_io = !self.show_io;
+        self.collector.set_io(self.show_io);
+        if !self.show_io && matches!(self.sort, Column::Read | Column::Write) {
+            self.sort = Column::Cpu;
+            self.sort_desc = true;
+        }
+        if !self.show_io && matches!(self.focus, Column::Read | Column::Write) {
+            self.focus = self.sort;
+        }
+        let msg = match (self.show_io, self.collector.target().is_some()) {
+            (false, _) => "I/O columns hidden",
+            (true, true) => "per-process I/O is not read in Kubernetes mode (e on READ/s says why)",
+            (true, false) => "storage reads and writes per second · rates from the next sample",
+        };
+        self.set_status(msg);
+        self.rebuild();
     }
 
     /// `C`: all containers → the first → the next … → all again.

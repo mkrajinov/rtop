@@ -470,19 +470,30 @@ macos = "Not available. ri_logical_writes is the closest."
 man = ["proc_pid_io(5)"]
 
 [io_read]
-title = "Storage bytes read"
-what = "Bytes this process actually caused to be fetched from a block device. If this is low while rchar is high, the reads are being served from the page cache."
-linux = "read_bytes in /proc/<pid>/io."
-macos = "rusage_info_v4.ri_diskio_bytesread."
-try = ["cat /proc/self/io", "iotop -o"]
-man = ["proc_pid_io(5)"]
+title = "Storage bytes read (READ/s)"
+what = "Bytes this process caused to be fetched from storage. READ/s (key i) is the difference between two samples of that total over the seconds between them, like CPU%. A read served from the page cache never reaches the disk and counts 0 here: re-reading a file you just read shows nothing, which is the point. rchar in the detail view counts every byte through read(), cache hits, pipes and sockets included."
+linux = "read_bytes in /proc/<pid>/io, needs the kernel's task I/O accounting (CONFIG_TASK_IO_ACCOUNTING). The file is ptrace-gated: another user's process shows — unless rtop runs as root."
+macos = "rusage_info_v4.ri_diskio_bytesread from proc_pid_rusage(RUSAGE_INFO_V4). Other users' processes show — (EPERM), like their other task data."
+pitfalls = [
+  "Readahead is charged to the reader: one small read can count 128K or more.",
+  "Memory-mapped files are read by page faults, not read(): they still count here, but not in rchar.",
+  "In rtop k8s the columns show —: the reader would need one more file per process per second through a shell, and isn't taught that yet.",
+]
+try = ["cat /proc/self/io", "iotop -o", "pidstat -d 1", "sudo fs_usage -f diskio   # macOS", "echo 3 | sudo tee /proc/sys/vm/drop_caches   # Linux: make the next read hit the disk"]
+man = ["proc_pid_io(5)", "proc_pid_rusage(3)", "iotop(8)"]
 
 [io_write]
-title = "Storage bytes written"
-what = "Bytes this process caused to be written to storage. Writes land in the page cache first and are flushed later, often by a kernel thread, so the timing doesn't line up with write() calls."
-linux = "write_bytes in /proc/<pid>/io. cancelled_write_bytes counts dirty pages discarded by truncation."
-macos = "rusage_info_v4.ri_diskio_byteswritten."
-man = ["proc_pid_io(5)"]
+title = "Storage bytes written (WRITE/s)"
+what = "Bytes this process caused to be written to storage, per second with key i. write() only copies into the page cache and marks pages dirty; the kernel's flusher threads write them out up to ~30 s later. So WRITE/s shows when the process dirtied the data, not when the disk wrote it, and the disk card can be busy while no process seems to write."
+linux = "write_bytes in /proc/<pid>/io, charged to the process when it dirties the page (not at writeback). cancelled_write_bytes counts dirty pages thrown away by truncate or unlink before they were written; the net written is the difference."
+macos = "rusage_info_v4.ri_diskio_byteswritten from proc_pid_rusage(RUSAGE_INFO_V4)."
+pitfalls = [
+  "A process that writes then deletes a temp file can show large WRITE/s that never reached the disk (see cancelled_write_bytes).",
+  "fsync() makes the process wait for its writes; that time shows as D state on Linux, not as CPU.",
+  "In rtop k8s the columns show —; see READ/s.",
+]
+try = ["cat /proc/self/io", "dd if=/dev/zero of=big bs=1M count=1000; rm big", "grep -E 'Dirty|Writeback' /proc/meminfo", "pidstat -d 1"]
+man = ["proc_pid_io(5)", "proc_pid_rusage(3)", "fsync(2)"]
 
 [oom_score]
 title = "OOM score"

@@ -127,6 +127,8 @@ pub fn process_row(
         // stat is world-readable, so every column is real even for other
         // users' processes; only fd/, environ, maps... are ptrace-gated.
         restricted: false,
+        io: None,
+        io_rate: None,
         origin: None,
     })
 }
@@ -728,6 +730,15 @@ pub fn parse_limits(text: &str, source: &str) -> Vec<Field> {
                 .hint(name)
         })
         .collect()
+}
+
+/// `read_bytes` and `write_bytes` from `/proc/PID/io`: what the process
+/// made the block layer move, as opposed to `rchar`/`wchar` (every byte
+/// through read()/write(), page cache hits and pipes included).
+pub fn io_bytes(text: &str) -> Option<[u64; 2]> {
+    let kv = key_values(text, ':');
+    let get = |k: &str| kv.get(k)?.parse().ok();
+    Some([get("read_bytes")?, get("write_bytes")?])
 }
 
 fn key_values(text: &str, sep: char) -> HashMap<String, String> {
@@ -1362,6 +1373,16 @@ mod tests {
         let f = parse_limits(text, "/proc/1/limits");
         assert_eq!(f[0].key, "limit_nofile");
         assert_eq!(f[0].value, "soft 1024 / hard 1048576 files");
+    }
+
+    #[test]
+    fn io_bytes_are_storage_not_syscall_bytes() {
+        let dd = fixture("dd", "io").unwrap();
+        // 2 GB passed to write(), all of it charged as storage writes; reads
+        // came from /dev/zero, so almost nothing was read from storage.
+        assert_eq!(io_bytes(&dd), Some([8192, 2_097_152_000]));
+        assert_eq!(io_bytes(&fixture("self", "io").unwrap()), Some([0, 0]));
+        assert_eq!(io_bytes("rchar: 1\n"), None, "kernel without task I/O accounting");
     }
 
     #[test]

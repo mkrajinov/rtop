@@ -34,6 +34,18 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 crate::app::Column::State => format!("{} — {}", p.state.letter(), p.state.label()),
                 crate::app::Column::Nice => p.nice.to_string(),
                 crate::app::Column::Pri => p.priority.to_string(),
+                c @ (crate::app::Column::Read | crate::app::Column::Write) => {
+                    let i = usize::from(c == crate::app::Column::Write);
+                    match (p.io, p.io_rate) {
+                        (None, _) => "not read (see below)".into(),
+                        (Some(t), None) => {
+                            format!("{} so far; rate from the next sample", crate::fmt::bytes_exact(t[i]))
+                        }
+                        (Some(t), Some(r)) => {
+                            format!("{}/s, {} so far", crate::fmt::bytes(r[i] as u64), crate::fmt::bytes_exact(t[i]))
+                        }
+                    }
+                }
                 crate::app::Column::Threads => p.threads.to_string(),
                 crate::app::Column::Fds => p.fds.map_or("not permitted".into(), |n| n.to_string()),
                 crate::app::Column::Time => crate::fmt::cpu_time(p.cpu_time_ns),

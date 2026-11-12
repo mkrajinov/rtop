@@ -46,7 +46,7 @@ Size: **S** is an evening, **M** a few days, **L** a week or more.
 
 | | Feature | Teaches | Linux source | macOS source | Size |
 |---|---|---|---|---|---|
-| [ ] | Per-process I/O columns (read/s, write/s) | `rchar` vs `read_bytes`; page cache hits never reach the disk | `/proc/PID/io` | `proc_pid_rusage` (`ri_diskio_*`) | S |
+| [x] | Per-process I/O columns (read/s, write/s), key `i` | `rchar` vs `read_bytes`; page cache hits never reach the disk | `/proc/PID/io` | `proc_pid_rusage` (`ri_diskio_*`) | S |
 | [ ] | Per-process network sockets tab with TCP states | the socket → inode → fd chain | `/proc/net/tcp*`, `/proc/PID/fd` | `proc_pidfdinfo` (`PROC_PIDFDSOCKETINFO`) | M |
 | [ ] | Container view: group processes by container | a container is just namespaces plus a cgroup | `/proc/PID/cgroup`, `ns/*` inodes, Docker cgroup path | n/a (explain why) | M |
 | [ ] | Signal disposition view (blocked, ignored, caught, pending) | why `SIGKILL` always works and `SIGTERM` may not | `SigBlk/SigIgn/SigCgt/SigPnd` in `status` | `proc_pidinfo` (`pbsi_*`) where available | S |

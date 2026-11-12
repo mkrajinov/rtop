@@ -41,4 +41,4 @@ expression: screen
  │                                                                                                                                                  │
  │                                                                                                                                                  │
  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  ↑↓  select    ←→  column    s  sort    e  explain    L  lessons    Enter  inspect    /  filter    t  tree    c  paths    f  family    k  signal
+  ↑↓  select    ←→  column    s  sort    e  explain    L  lessons    Enter  inspect    /  filter    t  tree    c  paths    i  I/O    f  family    k

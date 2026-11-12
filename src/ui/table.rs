@@ -58,6 +58,8 @@ fn width(c: Column, names: Names) -> Constraint {
         Column::Cpu => Constraint::Length(11),
         Column::Mem => Constraint::Length(10),
         Column::Vsz | Column::Rss => Constraint::Length(6),
+        // "WRITE/s▼" when sorted.
+        Column::Read | Column::Write => Constraint::Length(8),
         Column::Threads => Constraint::Length(4),
         Column::Fds => Constraint::Length(5),
         Column::Time => Constraint::Length(9),
@@ -91,8 +93,17 @@ fn min_width(c: Column, names: Names) -> u16 {
 /// Drop the least essential columns until the rest fit, so narrow terminals
 /// (or an open explain panel) never truncate PIDs.
 fn visible_columns(mut cols: Vec<Column>, avail: u16, names: Names) -> Vec<Column> {
-    const DROP_ORDER: [Column; 6] =
-        [Column::Pri, Column::Vsz, Column::Time, Column::Fds, Column::Threads, Column::User];
+    // The I/O columns were asked for with `i`, so they go last.
+    const DROP_ORDER: [Column; 8] = [
+        Column::Pri,
+        Column::Vsz,
+        Column::Time,
+        Column::Fds,
+        Column::Threads,
+        Column::User,
+        Column::Read,
+        Column::Write,
+    ];
     for drop in DROP_ORDER {
         if cols.iter().map(|&c| min_width(c, names)).sum::<u16>() <= avail {
             break;
@@ -169,6 +180,14 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
             u if u == me => Style::default().fg(theme::pal().text),
             _ => theme::dim(),
         };
+        // Storage bytes per second, coloured like the disk card's read and
+        // write graphs. `—`: not readable; blank: no second sample yet.
+        let io = |i: usize, color| match (p.io, p.io_rate) {
+            (None, _) => Cell::from(Line::from("—").right_aligned()).style(theme::faint()),
+            (Some(_), None) => Cell::from(""),
+            (Some(_), Some(r)) if r[i] < 1.0 => num("0".into()).style(theme::faint()),
+            (Some(_), Some(r)) => num(fmt::bytes(r[i] as u64)).style(Style::default().fg(color)),
+        };
         let cells = vec![
             num(p.pid.to_string()).style(theme::dim()),
             Cell::from(crate::app::pod(p).to_string()).style(theme::text()),
@@ -202,6 +221,8 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 num(fmt::bytes(p.rss)).style(Style::default().fg(theme::pal().text))
             },
+            io(0, theme::pal().code),
+            io(1, theme::pal().zombie),
             unknown(p.threads.to_string()),
             p.fds.map_or(Cell::from(Line::from("—").right_aligned()).style(theme::faint()), |n| {
                 num(n.to_string()).style(theme::dim())

@@ -155,6 +155,13 @@ pub struct Process {
     pub start_time: u64,
     /// The kernel refused to tell us some details (other user's process).
     pub restricted: bool,
+    /// Storage bytes read and written so far: Linux `read_bytes` and
+    /// `write_bytes`, macOS `ri_diskio_*`. `None` while the I/O columns are
+    /// hidden (nothing is read then) or when the kernel won't say.
+    pub io: Option<[u64; 2]>,
+    /// Bytes per second from two samples of `io`, set by
+    /// [`crate::collector::cpu::IoTracker`]; `None` until the second.
+    pub io_rate: Option<[f32; 2]>,
     pub origin: Option<Origin>,
 }
 

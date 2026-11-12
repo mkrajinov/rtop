@@ -35,6 +35,24 @@ fn process_table() {
 }
 
 #[test]
+fn i_shows_storage_io_rates_from_the_second_sample() {
+    let mut app = app();
+    press(&mut app, KeyCode::Char('i'));
+    app.refresh();
+    let first = render(&mut app, 150, 10);
+    assert!(first.contains("READ/s") && first.contains("WRITE/s"), "{first}");
+    app.refresh();
+    // Sort by the focused column: move the focus to WRITE/s first.
+    while app.focus != rtop::app::Column::Write {
+        press(&mut app, KeyCode::Right);
+    }
+    press(&mut app, KeyCode::Char('s'));
+    insta::assert_snapshot!(render(&mut app, 150, 10));
+    press(&mut app, KeyCode::Char('i'));
+    assert!(!render(&mut app, 150, 10).contains("READ/s"));
+}
+
+#[test]
 fn tree_view_shows_parentage() {
     let mut app = app();
     press(&mut app, KeyCode::Char('t'));

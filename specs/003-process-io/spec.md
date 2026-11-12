@@ -36,7 +36,7 @@ is on top, and its rate matches `dd`'s own report within one sample.
 
 - A recycled PID never inherits the old process's counters (keyed by start time).
 - Counters that go backwards read as 0, not a spike.
-- Narrow terminals: the I/O columns are dropped after PRI, VSZ and TIME+.
+- Narrow terminals: the I/O columns are dropped last, after PRI, VSZ, TIME+, FD, THR and USER.
 
 ## Requirements *(mandatory)*
 
