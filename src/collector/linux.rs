@@ -197,8 +197,8 @@ fn volumes() -> Option<Volumes> {
         if st.f_blocks == 0 {
             continue;
         }
-        let (size, used, free) =
-            super::space::space(st.f_blocks as u64, st.f_bfree as u64, st.f_bavail as u64, st.f_frsize as u64);
+        // All four are already u64 on 64-bit Linux (glibc and musl).
+        let (size, used, free) = super::space::space(st.f_blocks, st.f_bfree, st.f_bavail, st.f_frsize);
         list.push(Volume {
             mount: m.mount,
             device: m.source,
