@@ -8,8 +8,15 @@ use crossterm::event::{self, Event, KeyEventKind};
 use rtop::app::App;
 use rtop::{collector, labs, ui};
 
+/// The release workflow sets RTOP_VERSION from the git tag, so Cargo.toml's
+/// version never has to be bumped by a commit.
+const VERSION: &str = match option_env!("RTOP_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Parser)]
-#[command(version, about = "A process explorer that teaches you what every number means")]
+#[command(version = VERSION, about = "A process explorer that teaches you what every number means")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,

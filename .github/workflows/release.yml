@@ -1,0 +1,132 @@
+name: release
+# Every push to main checks the Conventional Commits since the last tag
+# (scripts/next-version.sh). feat/fix/perf/breaking commits create the next v* tag and
+# release it; anything else (docs, ci, build, chore, …) releases nothing.
+# Pushing a v* tag by hand also releases it. Tags pushed by this workflow do not start
+# it again (GitHub never triggers workflows from GITHUB_TOKEN pushes).
+#
+# Archives: static musl binaries for Linux, native binaries for macOS (Intel is
+# cross-compiled on the Apple silicon runner). The formula in mkrajinov/homebrew-tap
+# installs them with `brew install mkrajinov/tap/rtop`.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+permissions:
+  contents: write # push the tag, create the GitHub release
+concurrency:
+  group: release # one at a time, so two quick pushes can't compute the same tag
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      new: ${{ steps.version.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags and history for the next version
+      - id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            tag=$(./scripts/next-version.sh)
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "next version: ${tag:-none, no feat/fix/perf commits since the last tag}"
+          fi
+
+  build:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin, name: darwin_arm64, test: true }
+          - { os: macos-latest, target: x86_64-apple-darwin, name: darwin_amd64, test: false }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, name: linux_amd64, test: true }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, name: linux_arm64, test: false }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools # ring's C code
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - if: matrix.test
+        run: cargo test --locked
+      - name: Build
+        run: RTOP_VERSION="${TAG#v}" cargo build --release --locked --target ${{ matrix.target }}
+      - name: Archive
+        run: |
+          bin=target/${{ matrix.target }}/release/rtop
+          "$bin" --version 2>/dev/null || true # cross builds can't run here
+          mkdir pkg && cp "$bin" README.md pkg/
+          tar -czf "rtop_${TAG#v}_${{ matrix.name }}.tar.gz" -C pkg .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: rtop_*.tar.gz
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum rtop_*.tar.gz > checksums.txt && cat checksums.txt
+      - name: Tag
+        if: needs.version.outputs.new == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "rtop $TAG"
+          git push origin "$TAG"
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Re-runs replace the assets so the archives and the formula always match.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "rtop ${TAG#v}" --generate-notes
+          fi
+      # HOMEBREW_TAP_TOKEN: fine-grained token with "Contents: read and write" on
+      # mkrajinov/homebrew-tap only. Skipped with a warning when the secret isn't set.
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          ./scripts/formula.sh "${TAG#v}" dist/checksums.txt > rtop.rb
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set; copy rtop.rb to the tap's Formula/ by hand"
+            cat rtop.rb
+            exit 0
+          fi
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/mkrajinov/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp rtop.rb tap/Formula/rtop.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/rtop.rb
+          if git diff --cached --quiet; then
+            echo "Tap already up to date"
+            exit 0
+          fi
+          git commit -m "rtop $TAG"
+          git push

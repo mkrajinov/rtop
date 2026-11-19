@@ -6,6 +6,38 @@ Every number on screen can tell you what it means and where it came from:
 - Linux reads it from a file under `/proc`.
 - macOS reads it from a `proc_pidinfo(2)` / `sysctl(3)` struct.
 
+## Install
+
+```sh
+brew install mkrajinov/tap/rtop   # macOS and Linux, Apple silicon/ARM and Intel
+```
+
+Or from source: `cargo install --path .` (needs Rust; `--no-default-features` leaves out
+Kubernetes support).
+
+## Releases
+
+Releases are automatic. On every push to `main`, the `release` workflow looks at the
+Conventional Commits since the last `v*` tag (`scripts/next-version.sh`):
+
+| Commits since the last tag | Release |
+|---|---|
+| a `type!:` or `BREAKING CHANGE:` | major (minor before 1.0) |
+| a `feat:` | minor |
+| a `fix:` or `perf:` | patch |
+| only `docs:`, `ci:`, `build:`, `test:`, `chore:`, `refactor:`, `style:` | no release |
+
+It tests, builds static musl binaries for Linux and native ones for macOS (amd64 and arm64),
+tags the commit, creates the GitHub release, and writes `Formula/rtop.rb` in
+[mkrajinov/homebrew-tap](https://github.com/mkrajinov/homebrew-tap) (`scripts/formula.sh`).
+The version comes from the tag (`RTOP_VERSION` at build time); `Cargo.toml` isn't bumped.
+Pushing a `v*` tag by hand also releases it.
+
+One-time setup: the repository must be public (Homebrew downloads the release archives
+without credentials), and it needs the secret `HOMEBREW_TAP_TOKEN`: a fine-grained token with
+*Contents: read and write* on `homebrew-tap` only. Set it with
+`gh secret set HOMEBREW_TAP_TOKEN -R mkrajinov/rtop`.
+
 ## Run
 
 ```sh

@@ -91,13 +91,13 @@ These events can't be seen by polling `/proc`. They need `aya` and a privileged 
 
 - [x] `git init`, first commit, pushed to `github.com/mkrajinov/rtop`
 - [x] Spec Kit set up with the project constitution
-- [ ] CI: `make test lint` on macOS and Linux (GitHub Actions or GitLab CI)
-- [ ] Install clippy in the Docker image so `make lint` also runs on Linux
+- [x] CI: `make test lint` on macOS and Linux (GitHub Actions, `.github/workflows/ci.yml`)
+- [x] Install clippy in the Docker image so `make lint` also runs on Linux
 - [ ] Mouse support: click to select, scroll, and click a column header to sort
 - [ ] Record and replay: save a session of samples to a file and step through it later (good for labs)
 - [ ] `rtop inspect PID --json` for scripting
 - [ ] Configurable dashboard: choose and order the cards in `config.toml`
-- [ ] Release binaries and a Homebrew tap
+- [x] Release binaries and a Homebrew tap (`brew install mkrajinov/tap/rtop`, released from Conventional Commits)
 
 ## Suggested order
 
