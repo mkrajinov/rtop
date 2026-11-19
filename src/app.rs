@@ -431,10 +431,15 @@ impl App {
     }
 
     pub fn with_lab(mut self, lab: LabSession) -> Self {
+        let io = lab.lab.name == "pagecache";
         self.lab = Some(lab);
         self.tree = true;
         self.sort = Column::Pid;
         self.sort_desc = false;
+        if io {
+            self.show_io = true;
+            self.collector.set_io(true);
+        }
         self
     }
 

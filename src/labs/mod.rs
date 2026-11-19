@@ -230,6 +230,38 @@ pub const LABS: &[Lab] = &[
         ],
     },
     Lab {
+        name: "pagecache",
+        title: "The page cache: why a second read is free",
+        linux_only: false,
+        intro: "The worker writes two 256 MiB files and starts one reader per file: `pagecache-cold` and `pagecache-warm`. Both read their file from start to end at 64 MiB/s, over and over. The warm file stays in the page cache; the cold one is kept out of it (Linux: posix_fadvise DONTNEED after each pass, macOS: F_NOCACHE). The I/O columns are on (i).",
+        steps: &[
+            Step {
+                task: "Compare READ/s of the two readers. Both call read() at the same pace.",
+                answer: "pagecache-cold shows about 64M/s, pagecache-warm 0. READ/s counts bytes fetched from storage. The warm reader's reads are copies from RAM the kernel already holds, so the disk never sees them.",
+            },
+            Step {
+                task: "Open each reader (Enter → Overview). What do the I/O fields say?",
+                answer: "On Linux, 'Bytes read (any read syscall)' (rchar) grows by the same 64 MiB/s for both: the program can't tell a cache hit from a disk read except by speed. Only 'Bytes read from storage' (read_bytes) differs. macOS has no rchar; its storage counter (ri_diskio_bytesread) shows the same split.",
+            },
+            Step {
+                task: "How did the warm file get into the cache, and why does the cold one never stay there?",
+                answer: "write() copies into the page cache and the kernel writes the pages out later, so the freshly written file was already cached. The cold file is evicted after every pass (Linux) or never cached (macOS). Real systems lose cache the same way: after a reboot or failover, or when memory pressure reclaims pages that were not used recently.",
+            },
+            Step {
+                task: "Open a reader's Files tab. What is its stdin?",
+                answer: "The lab file, although the worker unlinked it right after creating it: Linux shows the path with ' (deleted)', macOS the old path, where `ls` finds nothing. An open file keeps its data until the last descriptor closes, which is why `df` and `du` disagree when a log is deleted while a process still writes it. The space comes back when the lab ends.",
+            },
+            Step {
+                task: "Where are the warm file's 256 MiB counted, and whose memory are they?",
+                answer: "As page cache: Cached in /proc/meminfo, buff/cache in `free`, file-backed pages in `vm_stat`. Not in the reader's RSS, because read() copies into its buffer rather than mapping the file. The kernel drops clean cache pages whenever programs need the RAM. In a container they are charged to its cgroup's memory.current, which is why the kubelet judges pods by the working set (memory.current minus inactive file pages).",
+            },
+            Step {
+                task: "You want to benchmark the disk, not RAM. What do you do?",
+                answer: "Read data that isn't cached: drop the cache first (Linux `echo 3 | sudo tee /proc/sys/vm/drop_caches`, macOS `sudo purge`), bypass it (O_DIRECT, `fio --direct=1`, F_NOCACHE), or use a file much larger than RAM. Otherwise the second run measures memory bandwidth.",
+            },
+        ],
+    },
+    Lab {
         name: "threads",
         title: "Threads inside one process",
         linux_only: false,

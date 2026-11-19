@@ -22,6 +22,9 @@ pub fn run(name: &str) -> anyhow::Result<()> {
         "cpuhog" => cpuhog(),
         "memgrow" => memgrow(deadline),
         "threads" => threads(deadline),
+        "pagecache" => pagecache(deadline),
+        "pagecache-cold" => reader(true, deadline),
+        "pagecache-warm" => reader(false, deadline),
         #[cfg(target_os = "linux")]
         "dstate" => dstate(deadline),
         #[cfg(target_os = "linux")]
@@ -142,6 +145,112 @@ fn memgrow(deadline: Instant) -> anyhow::Result<()> {
     sleep_until(deadline);
     unsafe { libc::munmap(base, RESERVE) };
     Ok(())
+}
+
+/// Size of each pagecache lab file, and the pace both readers keep.
+const PC_SIZE: usize = 256 << 20;
+const PC_CHUNK: usize = 8 << 20;
+const PC_RATE: f64 = 64.0 * (1 << 20) as f64;
+
+/// Two files of the same size: one stays in the page cache, the other is
+/// kept out of it. One reader each, started as `rtop __lab-worker
+/// pagecache-cold|warm` so the COMMAND column says which is which. Each
+/// reader gets its file as stdin; the files are unlinked at once, so the
+/// space comes back when the lab's process group is killed.
+fn pagecache(deadline: Instant) -> anyhow::Result<()> {
+    let exe = std::env::current_exe()?;
+    let mut kids = Vec::new();
+    for cold in [true, false] {
+        let role = if cold { "cold" } else { "warm" };
+        let path = std::env::temp_dir().join(format!("rtop-pagecache-{}-{role}", std::process::id()));
+        let mut f = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .with_context(|| format!("create {}", path.display()))?;
+        let _ = std::fs::remove_file(&path);
+        if cold {
+            no_cache(&f);
+        }
+        // Not zeros: some filesystems store all-zero blocks as holes.
+        let chunk = vec![0xa5u8; PC_CHUNK];
+        for _ in 0..PC_SIZE / PC_CHUNK {
+            std::io::Write::write_all(&mut f, &chunk).context("write the lab file")?;
+        }
+        f.sync_all().context("fsync the lab file")?;
+        if cold {
+            evict(&f);
+        }
+        kids.push(
+            std::process::Command::new(&exe)
+                .args(["__lab-worker", &format!("pagecache-{role}")])
+                .stdin(f)
+                .stdout(std::process::Stdio::null())
+                // Not rtop's stderr pipe: see quiet().
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .context("start a reader")?,
+        );
+    }
+    sleep_until(deadline);
+    for mut k in kids {
+        let _ = k.kill();
+        let _ = k.wait();
+    }
+    Ok(())
+}
+
+/// Read stdin (the lab file) from start to end with pread() at
+/// [`PC_RATE`], over and over, so every 1-second sample sees the reads.
+fn reader(cold: bool, deadline: Instant) -> anyhow::Result<()> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::fs::FileExt;
+    // SAFETY: fd 0 is the lab file pagecache() passed as stdin; nothing
+    // else in this process uses stdin.
+    let f = unsafe { File::from_raw_fd(0) };
+    let size = f.metadata().context("fstat stdin")?.len() as usize;
+    if cold {
+        no_cache(&f);
+    }
+    let mut buf = vec![0u8; PC_CHUNK];
+    let per_chunk = Duration::from_secs_f64(PC_CHUNK as f64 / PC_RATE);
+    while Instant::now() < deadline {
+        let mut off = 0;
+        while off < size {
+            let t = Instant::now();
+            let n = f.read_at(&mut buf, off as u64).context("pread")?;
+            if n == 0 {
+                break;
+            }
+            off += n;
+            thread::sleep(per_chunk.saturating_sub(t.elapsed()));
+        }
+        if cold {
+            evict(&f);
+        }
+    }
+    Ok(())
+}
+
+/// macOS: F_NOCACHE keeps this file's data out of the unified buffer cache.
+/// Linux has no per-file switch short of O_DIRECT; [`evict`] drops it instead.
+fn no_cache(_f: &File) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::fd::AsRawFd;
+        unsafe { libc::fcntl(_f.as_raw_fd(), libc::F_NOCACHE, 1) };
+    }
+}
+
+/// Linux: drop the file's clean pages from the page cache. Any user may do
+/// this for a file they can read; dropping everything (drop_caches) needs root.
+fn evict(_f: &File) {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        unsafe { libc::posix_fadvise(_f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+    }
 }
 
 fn threads(deadline: Instant) -> anyhow::Result<()> {

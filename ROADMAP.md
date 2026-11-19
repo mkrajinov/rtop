@@ -71,7 +71,7 @@ Size: **S** is an evening, **M** a few days, **L** a week or more.
 | [ ] | `throttle` | `cpu.max` set to 20%; the process runs, then waits; `nr_throttled` climbs | Linux | S |
 | [ ] | `cow` | fork, then write: RSS and PSS split as pages are copied | both | S |
 | [ ] | `signals` | handler installed, signal blocked, then pending; `SigCgt`/`SigPnd` bits flip | both | S |
-| [ ] | `pagecache` | read a large file twice; the second read never touches the disk (`read_bytes` stays 0) | Linux | S |
+| [x] | `pagecache` | a cold and a warm reader side by side; the warm one never touches the disk (`read_bytes` stays 0) | both | S |
 | [ ] | `timewait` | close sockets and watch them sit in TIME_WAIT | both | S |
 | [ ] | `pipe` | a writer blocks when the 64 KiB pipe buffer is full; wchan shows `pipe_write` | Linux | S |
 

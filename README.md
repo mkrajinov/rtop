@@ -153,6 +153,7 @@ accent = "violet"
 | `fdleak` | the FD count climbs until EMFILE at RLIMIT_NOFILE | both |
 | `cpuhog` | nice under contention; involuntary context switches | both |
 | `memgrow` | VSZ vs RSS, demand paging, minor faults | both |
+| `pagecache` | a cold and a warm reader side by side: READ/s vs `rchar`, page cache, deleted-but-open files, benchmarking the disk | both |
 | `threads` | TIDs and thread names; per-thread CPU time | both |
 | `dstate` | a task in D state (vfork wait); wchan; the load average rising with an idle CPU | Linux |
 | `namespace` | user, pid, net, uts and ipc namespaces; NSpid; capabilities inside a user namespace | Linux |
