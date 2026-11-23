@@ -2,7 +2,7 @@
 name = "rtop"
 version = "0.1.0"
 edition = "2024"
-description = "A process explorer TUI for learning how the OS manages processes"
+description = "rtop: top, with receipts. A process explorer that shows what every number means and where it comes from"
 license = "MIT"
 
 [dependencies]

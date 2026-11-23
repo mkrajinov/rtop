@@ -346,7 +346,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         )),
         Line::from(Span::styled("  Press any key to close.", theme::dim())),
     ];
-    f.render_widget(Paragraph::new(text).block(panel("help")).wrap(Wrap { trim: false }), r);
+    f.render_widget(Paragraph::new(text).block(panel("help · rtop: top, with receipts")).wrap(Wrap { trim: false }), r);
 }
 
 /// The `T` overlay; the k8s picker draws it too.

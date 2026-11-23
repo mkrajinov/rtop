@@ -1,4 +1,4 @@
-# rtop
+# rtop — the leaRning top
 
 An htop-style process explorer built for **learning how the kernel manages processes**.
 Every number on screen can tell you what it means and where it came from:

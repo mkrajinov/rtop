@@ -16,7 +16,7 @@ const VERSION: &str = match option_env!("RTOP_VERSION") {
 };
 
 #[derive(Parser)]
-#[command(version = VERSION, about = "A process explorer that teaches you what every number means")]
+#[command(version = VERSION, about = "rtop: top, with receipts. A process explorer that shows what every number means and where it comes from")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
