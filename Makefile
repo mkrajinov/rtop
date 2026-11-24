@@ -6,7 +6,7 @@ DOCKER_RUN := docker run --rm --pid=host --privileged \
 	-v $(CURDIR):/src -v rtop-target:/target -v rtop-cargo:/usr/local/cargo/registry \
 	-w /src $(IMAGE)
 
-.PHONY: run install test lint image linux-shell linux-test linux-run linux-up linux-exec linux-down kube-up kube-e2e kube-down
+.PHONY: run install test lint demo image linux-shell linux-test linux-run linux-up linux-exec linux-down kube-up kube-e2e kube-down
 
 run:
 	cargo run --release
@@ -21,6 +21,13 @@ lint:
 
 image:
 	docker build -t $(IMAGE) .
+
+# README GIF (assets/demo.tape). Recorded in a throwaway Linux container, never on the host:
+# rtop would show the host's user, IP, battery and apps.
+demo: image
+	$(DOCKER_RUN) sh -c 'cargo build --release && mkdir -p target/demo && cp /target/release/rtop target/demo/rtop'
+	docker run --rm --hostname rtop-demo -v $(CURDIR):/vhs \
+		-v $(CURDIR)/target/demo/rtop:/usr/local/bin/rtop:ro ghcr.io/charmbracelet/vhs assets/demo.tape
 
 linux-shell: image
 	docker run -it --rm --pid=host --privileged \

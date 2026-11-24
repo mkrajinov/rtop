@@ -69,7 +69,7 @@ jobs:
         run: |
           bin=target/${{ matrix.target }}/release/rtop
           "$bin" --version 2>/dev/null || true # cross builds can't run here
-          mkdir pkg && cp "$bin" README.md pkg/
+          mkdir pkg && cp "$bin" README.md LICENSE pkg/
           tar -czf "rtop_${TAG#v}_${{ matrix.name }}.tar.gz" -C pkg .
       - uses: actions/upload-artifact@v4
         with:

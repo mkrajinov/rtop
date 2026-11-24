@@ -1,10 +1,15 @@
-# rtop — the leaRning top
+# rtop — top, with receipts
 
 An htop-style process explorer built for **learning how the kernel manages processes**.
 Every number on screen can tell you what it means and where it came from:
 
 - Linux reads it from a file under `/proc`.
 - macOS reads it from a `proc_pidinfo(2)` / `sysctl(3)` struct.
+
+![rtop: the explain panel on RSS, then the pagecache lab (cold reader 64M READ/s, warm reader 0)](assets/demo.gif)
+
+Guided labs (`rtop lab zombie`, `pagecache`, `fdleak`, …) start real processes that show one
+kernel behaviour each, and walk you through what to look at.
 
 ## Install
 
